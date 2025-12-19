@@ -445,96 +445,92 @@ int main(int argc, char *argv[])
 
 		printf("Total Entry Count = %d\n", args->num_of_entries);
 		for(i = 0; i < args->num_of_entries; i++){
-			/* 使用指標 e 簡化引用 */
-			struct hnat_entry *e = &args->entries[i];
+			/* 1. 提取資料到局部變數 (解決對齊與類型問題) */
+			unsigned int i_sip = args->entries[i].ing_sipv4;
+			unsigned int i_dip = args->entries[i].ing_dipv4;
+			unsigned int e_sip = args->entries[i].eg_sipv4;
+			unsigned int e_dip = args->entries[i].eg_dipv4;
 
-			/* 數據預處理：解決 MIPS 非對齊存取 */
-			uint32_t i_sip = e->ing_sipv4;
-			uint32_t i_dip = e->ing_dipv4;
-			uint32_t e_sip = e->eg_sipv4;
-			uint32_t e_dip = e->eg_dipv4;
+			unsigned int is6[4], id6[4], es6[4], ed6[4];
+			is6[0] = args->entries[i].ing_sipv6_0; is6[1] = args->entries[i].ing_sipv6_1;
+			is6[2] = args->entries[i].ing_sipv6_2; is6[3] = args->entries[i].ing_sipv6_3;
+			id6[0] = args->entries[i].ing_dipv6_0; id6[1] = args->entries[i].ing_dipv6_1;
+			id6[2] = args->entries[i].ing_dipv6_2; id6[3] = args->entries[i].ing_dipv6_3;
+			es6[0] = args->entries[i].eg_sipv6_0; es6[1] = args->entries[i].eg_sipv6_1;
+			es6[2] = args->entries[i].eg_sipv6_2; es6[3] = args->entries[i].eg_sipv6_3;
+			ed6[0] = args->entries[i].eg_dipv6_0; ed6[1] = args->entries[i].eg_dipv6_1;
+			ed6[2] = args->entries[i].eg_dipv6_2; ed6[3] = args->entries[i].eg_dipv6_3;
 
-			uint32_t is6[4], id6[4], es6[4], ed6[4];
-			is6[0] = e->ing_sipv6_0; is6[1] = e->ing_sipv6_1;
-			is6[2] = e->ing_sipv6_2; is6[3] = e->ing_sipv6_3;
-
-			id6[0] = e->ing_dipv6_0; id6[1] = e->ing_dipv6_1;
-			id6[2] = e->ing_dipv6_2; id6[3] = e->ing_dipv6_3;
-
-			es6[0] = e->eg_sipv6_0; es6[1] = e->eg_sipv6_1;
-			es6[2] = e->eg_sipv6_2; es6[3] = e->eg_sipv6_3;
-
-			ed6[0] = e->eg_dipv6_0; ed6[1] = e->eg_dipv6_1;
-			ed6[2] = e->eg_dipv6_2; ed6[3] = e->eg_dipv6_3;
+			/* 2. 修正縮排與邏輯判斷 */
 
 			/* 格式化輸出邏輯 */
-			if(e->pkt_type == 0) { // IPV4_NAPT
+			if(args->entries[i].pkt_type == 0) { // IPV4_NAPT
 				printf("IPv4_NAPT=%d : %u.%u.%u.%u:%d->%u.%u.%u.%u:%d => %u.%u.%u.%u:%d->%u.%u.%u.%u:%d\n",
-					e->hash_index,
-					NIPQUAD(i_sip), e->ing_sp,
-					NIPQUAD(i_dip), e->ing_dp,
-					NIPQUAD(e_sip), e->eg_sp,
-					NIPQUAD(e_dip), e->eg_dp);
+					args->entries[i].hash_index,
+					NIPQUAD(i_sip), args->entries[i].ing_sp,
+					NIPQUAD(i_dip), args->entries[i].ing_dp,
+					NIPQUAD(e_sip), args->entries[i].eg_sp,
+					NIPQUAD(e_dip), args->entries[i].eg_dp);
 			}
-			else if(e->pkt_type == 1) { // IPV4_NAT
+			else if(args->entries[i].pkt_type == 1) { // IPV4_NAT
 				printf("IPv4_NAT=%d : %u.%u.%u.%u->%u.%u.%u.%u => %u.%u.%u.%u->%u.%u.%u.%u\n",
-					e->hash_index,
+					args->entries[i].hash_index,
 					NIPQUAD(i_sip),
 					NIPQUAD(i_dip),
 					NIPQUAD(e_sip),
 					NIPQUAD(e_dip));
 			}
-			else if(e->pkt_type == 2) { // IPV6_ROUTING
+			else if(args->entries[i].pkt_type == 2) { // IPV6_ROUTING
 				printf("IPv6_1T= %d /DIP: %x:%x:%x:%x:%x:%x:%x:%x\n",
-					e->hash_index,
+					args->entries[i].hash_index,
 					NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]));
 			}
-			else if(e->pkt_type == 3) { // IPV4_DSLITE
+			else if(args->entries[i].pkt_type == 3) { // IPV4_DSLITE
 				printf("DS-Lite= %d : %u.%u.%u.%u:%d->%u.%u.%u.%u:%d (%x:%x:%x:%x:%x:%x:%x:%x -> %x:%x:%x:%x:%x:%x:%x:%x) \n",
-					e->hash_index,
-					NIPQUAD(i_sip), e->ing_sp,
-					NIPQUAD(i_dip), e->ing_dp,
+					args->entries[i].hash_index,
+					NIPQUAD(i_sip), args->entries[i].ing_sp,
+					NIPQUAD(i_dip), args->entries[i].ing_dp,
 					NIPHALF(es6[0]), NIPHALF(es6[1]), NIPHALF(es6[2]), NIPHALF(es6[3]),
 					NIPHALF(ed6[0]), NIPHALF(ed6[1]), NIPHALF(ed6[2]), NIPHALF(ed6[3]));
 			}
-			else if(e->pkt_type == 4) { // IPV6_3T_ROUTE
+			else if(args->entries[i].pkt_type == 4) { // IPV6_3T_ROUTE
 				printf("IPv6_3T= %d SIP: %x:%x:%x:%x:%x:%x:%x:%x DIP: %x:%x:%x:%x:%x:%x:%x:%x\n",
-					e->hash_index,
+					args->entries[i].hash_index,
 					NIPHALF(is6[0]), NIPHALF(is6[1]), NIPHALF(is6[2]), NIPHALF(is6[3]),
 					NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]));
 			}
-			else if(e->pkt_type == 5) { // IPV6_5T_ROUTE
-				if(e->ipv6_flowlabel == 1) {
+			else if(args->entries[i].pkt_type == 5) { // IPV6_5T_ROUTE
+				if(args->entries[i].ipv6_flowlabel == 1) {
 					printf("IPv6_5T= %d SIP: %x:%x:%x:%x:%x:%x:%x:%x DIP: %x:%x:%x:%x:%x:%x:%x:%x (Flow Label=%x)\n",
-						e->hash_index,
+						args->entries[i].hash_index,
 						NIPHALF(is6[0]), NIPHALF(is6[1]), NIPHALF(is6[2]), NIPHALF(is6[3]),
 						NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]),
-						((e->ing_sp << 16) | (e->ing_dp)) & 0xFFFFF);
+						((args->entries[i].ing_sp << 16) | (args->entries[i].ing_dp)) & 0xFFFFF);
 				} else {
 					printf("IPv6_5T= %d SIP: %x:%x:%x:%x:%x:%x:%x:%x (SP:%d) DIP: %x:%x:%x:%x:%x:%x:%x:%x (DP=%d)\n",
-						e->hash_index,
-						NIPHALF(is6[0]), NIPHALF(is6[1]), NIPHALF(is6[2]), NIPHALF(is6[3]), e->ing_sp,
-						NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]), e->ing_dp);
+						args->entries[i].hash_index,
+						NIPHALF(is6[0]), NIPHALF(is6[1]), NIPHALF(is6[2]), NIPHALF(is6[3]), args->entries[i].ing_sp,
+						NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]), args->entries[i].ing_dp);
 				}
 			}
-			else if(e->pkt_type == 7) { // IPV6_6RD
-				if(e->ipv6_flowlabel == 1) {
+			else if(args->entries[i].pkt_type == 7) { // IPV6_6RD
+				if(args->entries[i].ipv6_flowlabel == 1) {
 					printf("6RD= %d %x:%x:%x:%x:%x:%x:%x:%x->%x:%x:%x:%x:%x:%x:%x:%x [Flow Label=%x]\n",
-						e->hash_index,
+						args->entries[i].hash_index,
 						NIPHALF(is6[0]), NIPHALF(is6[1]), NIPHALF(is6[2]), NIPHALF(is6[3]),
 						NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]),
-						((e->ing_sp << 16) | (e->ing_dp)) & 0xFFFFF);
+						((args->entries[i].ing_sp << 16) | (args->entries[i].ing_dp)) & 0xFFFFF);
 					printf("(%u.%u.%u.%u->%u.%u.%u.%u)\n", NIPQUAD(e_sip), NIPQUAD(e_dip));
 				} else {
 					printf("6RD= %d /SIP: %x:%x:%x:%x:%x:%x:%x:%x [SP:%d] /DIP: %x:%x:%x:%x:%x:%x:%x:%x [DP=%d] ",
-						e->hash_index,
-						NIPHALF(is6[0]), NIPHALF(is6[1]), NIPHALF(is6[2]), NIPHALF(is6[3]), e->ing_sp,
-						NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]), e->ing_dp);
+						args->entries[i].hash_index,
+						NIPHALF(is6[0]), NIPHALF(is6[1]), NIPHALF(is6[2]), NIPHALF(is6[3]), args->entries[i].ing_sp,
+						NIPHALF(id6[0]), NIPHALF(id6[1]), NIPHALF(id6[2]), NIPHALF(id6[3]), args->entries[i].ing_dp);
 					printf("(%u.%u.%u.%u->%u.%u.%u.%u)\n", NIPQUAD(e_sip), NIPQUAD(e_dip));
 				}
 			}
 			else {
-				printf("unknown packet type! (pkt_type=%d) \n", e->pkt_type);
+				printf("unknown packet type! (pkt_type=%d) \n", args->entries[i].pkt_type);
 			}
 		}
 		result = args->result;
