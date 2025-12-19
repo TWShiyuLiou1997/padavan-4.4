@@ -1,81 +1,216 @@
-name: CI
+name: Custom-Router-Build-Final-Fix
 
-# Controls when the action will run. 
-on: 
-  push:
-  pull_request:
+on:
   workflow_dispatch:
     inputs:
-      debug_enabled:
-        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'     
-        required: false
-        default: 'no'
-  release:
-    types: [published]
+      target_select:
+        description: "選擇機型 (支援 K2P, K2P-NANO, K2P-USB 等)"
+        required: true
+        type: choice
+        options:
+          - K2P
+          - K2P-NANO
+          - K2P-USB
+          - MI-R3G
+          - NEWIFI3
+          - RM2100
+        default: K2P
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+      nanoversion:
+        description: "是否執行極限瘦身"
+        type: boolean
+        default: false
+        
+      customization:
+        description: '自定義配置 JSON'
+        required: true
+        type: string
+        default: '{"lanip":"192.168.0.1","signaccount":"admin","signpassword":"admin","wifi2gssid":"Padavan","wifi2gpsk":"1234567890","wifi5gssid":"Padavan-5G","wifi5gpsk":"1234567890"}'
+        
+      toolchain_select:
+        description: "選擇編譯工具鏈"
+        required: true
+        type: choice
+        options:
+          - Default (hanwckf/linux-4.4-v1.0, uclibc)
+          - TurboTse/musl (gcc 13.3.0, musl 1.2.5)
+          - TurboTse/uclibc (gcc 13.3.0, uClibc-ng 1.0.52)
+          - tsl0922/musl (gcc 13.2.0, musl 1.2.4)
+          - tsl0922/uclibc (gcc 13.2.0, uClibc-ng 1.0.43)
+          - hanwckf/uclibc-v1.1 (gcc 7.4.0, uclibc 1.0.32, SO_REUSEPORT patch)
+        default: Default (hanwckf/linux-4.4-v1.0, uclibc)
+
 jobs:
   build:
-    name: build
-    runs-on: ubuntu-20.04
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) }}
-    env:
-      build_variant: ${{ matrix.build_variant }}
-      targets: ${{ matrix.targets }}
-      images_dir: /opt/images
-    strategy:
-      matrix:
-        include:
-          - build_variant: "mt7621"
-            targets: "K2P_nano K2P DIR-878 CR660x JCG-Q20"
-          - build_variant: "mt7621-usb-1"
-            targets: "XY-C1 JCG-836PRO JCG-Y2"
-          - build_variant: "mt7621-usb-2"
-            targets: "DIR-882 JCG-AC860M NETGEAR-BZV MI-R3P"
+    runs-on: ubuntu-latest
+    if: github.event.repository.owner.id == github.event.sender.id
+
     steps:
-      - uses: actions/checkout@v2
-      - name: Prepare environment
+      - name: 📥-Checkout-Repository
+        uses: actions/checkout@master
+        
+      - name: 🚀-Install-Dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt update
-          sudo apt install libtool-bin gperf python3-docutils autopoint gettext
-      - name: Run shellcheck
-        run: sh ./trunk/tools/shellcheck.sh
-      - name: Prepare toolchain
-        run: |
-          cd toolchain-mipsel
-          sh dl_toolchain.sh
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug_enabled == 'yes' }}
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            unzip cpio 7zip p7zip-full curl wget git \
+            build-essential fakeroot flex bison gawk gperf \
+            autoconf automake libtool-bin libltdl-dev \
+            python3-docutils autopoint gettext texinfo help2man \
+            zlib1g-dev liblzma-dev liblzo2-dev \
+            libgmp3-dev libmpc-dev libmpfr-dev \
+            libncurses5-dev xxd nano cmake pkg-config ccache jq
+          # 設定台灣時間 YYYYMMDD-HHMM
+          echo "BUILD_TIME=$(TZ='Asia/Taipei' date +%Y%m%d-%H%M)" >> $GITHUB_ENV
+          mkdir -p /opt/images/
+
+      - name: 💾-Set-up-ccache
+        uses: hendrikmuhs/ccache-action@main
         with:
-          limit-access-to-actor: true
-      - name: Start build
+          key: ${{ runner.os }}-ccache-${{ inputs.target_select }}-${{ hashFiles('trunk/configs/templates/*.config') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ inputs.target_select }}-
+
+      - name: 🔎-Export-Custom-Variables
         run: |
-          cd trunk
-          mkdir -p ${images_dir}
-          for m in $targets; do fakeroot ./build_firmware_ci $m; \
-          if [ $? = 0 ]; then cp -f images/*.trx ${images_dir}/$m.trx; else exit 1; fi; \
-          ./clear_tree_simple >/dev/null 2>&1; done
-      - name: Create archive
-        if: ${{ github.event_name != 'release' && success() }}
+          jq empty <<< '${{ inputs.customization }}' || { echo "❌ Invalid JSON"; exit 1; }
+          echo '${{ inputs.customization }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' | while IFS='=' read -r k v; do
+            echo "${k^^}=$v" >> $GITHUB_ENV  
+          done
+
+      - name: ⬇️-Clone-Source-Code
         run: |
-          ls -lh ${images_dir}
-          GIT_VERSION=`git rev-parse --short=7 HEAD 2>/dev/null` && [ -n "$GIT_VERSION" ] && \
-          image_name=images_${build_variant}_${GIT_VERSION} || image_name=images_${build_variant}
-          cd ${images_dir}; md5sum *.trx |tee md5sum.txt; 7z a -mx=9 ${image_name}.7z ./*
-          echo "image_name=${image_name}" >> $GITHUB_ENV
-      - name: Upload images to Artifact
-        if: ${{ github.event_name != 'release' && success() }}
-        uses: actions/upload-artifact@v2.2.1
+          git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
+
+      - name: ⬇️-Prepare-Toolchain
+        env:
+          TOOLCHAIN_CHOICE: ${{ inputs.toolchain_select }}
+          TOOLCHAIN_DIR: /opt/rt-n56u/toolchain-mipsel/toolchain-4.4.x
+        run: |
+          cd /opt/rt-n56u/toolchain-mipsel
+          TOOLCHAIN_TAG_FOR_NAME=$(echo "${{ inputs.toolchain_select }}" | sed 's/ (.*//g' | sed 's/\//-/g')
+          echo "TOOLCHAIN_TAG_FOR_NAME=$TOOLCHAIN_TAG_FOR_NAME" >> $GITHUB_ENV
+          
+          case "$TOOLCHAIN_CHOICE" in
+            "Default (hanwckf/linux-4.4-v1.0, uclibc)") sh dl_toolchain.sh ;;
+            "TurboTse/musl (gcc 13.3.0, musl 1.2.5)") URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" ;;
+            "TurboTse/uclibc (gcc 13.3.0, uClibc-ng 1.0.52)") URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-uclibc.tar.xz" ;;
+            "tsl0922/musl (gcc 13.2.0, musl 1.2.4)") URL="https://github.com/tsl0922/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" ;;
+            "tsl0922/uclibc (gcc 13.2.0, uClibc-ng 1.0.43)") URL="https://github.com/tsl0922/padavan/releases/download/toolchain/mipsel-linux-uclibc.tar.xz" ;;
+            "hanwckf/uclibc-v1.1 (gcc 7.4.0, uclibc 1.0.32, SO_REUSEPORT patch)") URL="https://github.com/hanwckf/padavan-toolchain/releases/download/v1.1/mipsel-linux-uclibc.tar.xz" ;;
+          esac
+          
+          if [ ! -z "$URL" ]; then
+            curl -O -L "$URL"
+            rm -rf "$TOOLCHAIN_DIR"; mkdir -p "$TOOLCHAIN_DIR"
+            tar -xf "$(basename $URL)" -C "$TOOLCHAIN_DIR" --strip-components=1
+          fi
+          sudo rm -rf /toolchain-4.4.x
+          sudo ln -s "$TOOLCHAIN_DIR" /toolchain-4.4.x
+
+      - name: 📝-CORE-Modify-Template-and-Sync-Config
+        env:
+          RAW_TNAME: ${{ inputs.target_select }}
+          NANO_OPT: ${{ inputs.nanoversion }}
+        run: |
+          TEMPLATE_DIR="/opt/rt-n56u/trunk/configs/templates"
+          TRUNK_CONFIG="/opt/rt-n56u/trunk/.config"
+          
+          # 解決 - 與 _ 的匹配問題
+          PATTERN_A=$(echo "$RAW_TNAME" | sed 's/-/_/g')
+          PATTERN_B=$(echo "$RAW_TNAME")
+          TARGET_FILE=$(find "$TEMPLATE_DIR" -maxdepth 1 \( -iname "${PATTERN_A}.config" -o -iname "${PATTERN_B}.config" \) | head -n 1)
+          
+          if [ -z "$TARGET_FILE" ] || [ ! -f "$TARGET_FILE" ]; then
+             echo "::error:: ❌ 找不到設定檔！" && exit 1
+          fi
+          
+          REAL_MODEL=$(basename "$TARGET_FILE" .config)
+          echo "REAL_MODEL=$REAL_MODEL" >> $GITHUB_ENV
+
+          # 極限瘦身邏輯
+          if [ "$NANO_OPT" = "true" ] || [[ "$REAL_MODEL" =~ "nano" ]]; then
+            modules=(
+              UVC HID SERIAL AUDIO XFRM IMQ IFB NFSD NFSC CIFS \
+              NTFS_3G LPRD U2EC HDPARM PARTED SMBD WINS SMBD_SYSLOG \
+              FTPD RPL2TP EAP_PEAP DROPBEAR DROPBEAR_FAST_CODE OPENVPN \
+              SSWAN XUPNPD MINIDLNA FIREFLY FFMPEG_NEW TRANSMISSION \
+              TRANSMISSION_WEB_CONTROL ARIA QOS ARIA_WEB_CONTROL SCUTCLIENT \
+              GDUT_DRCOM DOGCOM MINIEAP NJIT_CLIENT SOFTETHERVPN_SERVER \
+              SOFTETHERVPN_CLIENT SOFTETHERVPN_CMD VLMCSD TTYD MSD_LITE \
+              LRZSZ IPERF3 DUMP1090 RTL_SDR MTR SOCAT SRELAY \
+              MENTOHUST FRPC FRPS REDSOCKS SHADOWSOCKS XRAY V2RAY \
+              TROJAN SSOBFS SINGBOX NAIVEPROXY ADBYBY DNSFORWARDER \
+              SMARTDNS ADGUARDHOME ZEROTIER ALIDDNS DDNSTO ALDRIVER \
+              SQM WIREGUARD
+            )
+            for mod in "${modules[@]}"; do
+              sed -i "s/CONFIG_FIRMWARE_INCLUDE_${mod}=y/CONFIG_FIRMWARE_INCLUDE_${mod}=n/g" "$TARGET_FILE"
+            done
+          fi
+
+          # 核心保留模組 (確保移除 HTOP/NANO)
+          keep_modules=(OPENSSH SFTP TCPDUMP CURL HTTPS OPENSSL_EC OPENSSL_EXE SFE)
+          for kmod in "${keep_modules[@]}"; do
+            sed -i "/CONFIG_FIRMWARE_INCLUDE_${kmod}/d" "$TARGET_FILE"
+            echo "CONFIG_FIRMWARE_INCLUDE_${kmod}=y" >> "$TARGET_FILE"
+          done
+          
+          cp -f "$TARGET_FILE" "$TRUNK_CONFIG"
+
+      - name: 🔨-Build-Host-Tools
+        run: |
+          cd /opt/rt-n56u/trunk
+          [ -f "tools/mkimage/mkimage.c" ] && sed -i 's/"%d\.%d"/"%hhd.%hhd"/g' tools/mkimage/mkimage.c
+          make tools
+
+      - name: 📝-Apply-Custom-Settings
+        run: |
+          cd /opt/rt-n56u
+          chmod +x trunk/custom/scripts/*.sh
+          bash trunk/custom/scripts/setip.sh "${{ env.LANIP }}" trunk/user/shared/defaults.h trunk/user/www/dict/CN.dict
+          bash trunk/custom/scripts/setaccount.sh "${{ env.SIGNACCOUNT }}" "${{ env.SIGNPASSWORD }}" trunk/user/shared/defaults.h
+          bash trunk/custom/scripts/setwifi.sh "${{ env.WIFI2GSSID }}" "${{ env.WIFI2GPSK }}" "${{ env.WIFI5GSSID }}" "${{ env.WIFI5GPSK }}" trunk/user/shared/defaults.h
+
+      - name: 🏗️-Build-Firmware
+        run: |
+          cd /opt/rt-n56u/trunk
+          sudo ./clear_tree
+          sudo ./build_firmware_modify "${{ env.REAL_MODEL }}" 0
+          
+          FINAL_FILENAME="${{ env.REAL_MODEL }}-${{ env.TOOLCHAIN_TAG_FOR_NAME }}-${{ env.BUILD_TIME }}.trx"
+          FOUND_FILE=$(find images -name "*.trx" | head -n 1)
+          if [ -z "$FOUND_FILE" ]; then echo "::error::未產出 TRX 檔案"; exit 1; fi
+          sudo mv -f "$FOUND_FILE" "/opt/images/$FINAL_FILENAME"
+          echo "FINAL_FILE_PATH=/opt/images/$FINAL_FILENAME" >> $GITHUB_ENV
+
+      - name: 📦-Upload-Artifacts
+        uses: actions/upload-artifact@master
         with:
-          name: ${{ env.image_name }}
-          path: ${{ env.images_dir }}/*.7z
-      - name: Upload images to Releases
-        if: ${{ github.event_name == 'release' && success() }}
-        uses: svenstaro/upload-release-action@2.2.0
+          name: ${{ inputs.target_select }}-${{ env.BUILD_TIME }}
+          path: /opt/images
+
+      - name: 🏷️-Set-Release-Tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "TAG_NAME=build-${{ inputs.target_select }}-${{ env.BUILD_TIME }}" >> $GITHUB_ENV
+
+      - name: 🚀-Publish-Release
+        if: github.event_name == 'workflow_dispatch'
+        uses: ncipollo/release-action@v1
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ env.images_dir }}/*.trx
-          tag: ${{ github.ref }}
-          overwrite: true
-          file_glob: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit: ${{ github.sha }}
+          tag: ${{ env.TAG_NAME }}
+          name: Build ${{ inputs.target_select }} (${{ env.BUILD_TIME }})
+          body: |
+            **Padavan 編譯報告**
+            * 機型: ${{ inputs.target_select }}
+            * 時間: ${{ env.BUILD_TIME }}
+            * LAN IP: ${{ env.LANIP }}
+            * 工具鏈: ${{ inputs.toolchain_select }}
+          artifacts: ${{ env.FINAL_FILE_PATH }}
+          allowUpdates: true
+          artifactErrorsFailBuild: true
