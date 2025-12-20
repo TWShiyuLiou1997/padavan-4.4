@@ -3601,7 +3601,7 @@ defined(CONFIG_MBSS_SUPPORT)
 		dst_port[DP_WDS3] = ra_dev_get_by_name("wds3");
 #endif
 #if defined(CONFIG_RT2860V2_AP_APCLI) || defined(CONFIG_APCLI_SUPPORT)
-		dst_port[DP_APCLI0] = ra_dev_get_by_name("apcli0");
+		dst_port[DP_APCLI0] = ra_dev_get_by_name("apclix0");
 #endif
 #if defined(CONFIG_RT2860V2_AP_MESH)
 		dst_port[DP_MESH0] = ra_dev_get_by_name("mesh0");
@@ -3635,7 +3635,7 @@ defined(CONFIG_MBSS_SUPPORT)
 defined(CONFIG_RT3572_AP_APCLI) || defined(CONFIG_RT5572_AP_APCLI) || \
 defined(CONFIG_RT5592_AP_APCLI) || defined(CONFIG_RT3593_AP_APCLI) || \
 defined(CONFIG_MT7610_AP_APCLI) || defined(CONFIG_APCLI_SUPPORT)
-		dst_port[DP_APCLII0] = ra_dev_get_by_name("apclii0");
+		dst_port[DP_APCLII0] = ra_dev_get_by_name("apcli0");
 #endif				/* CONFIG_RTDEV_AP_APCLI // */
 #if defined(CONFIG_RT3090_AP_WDS) || defined(CONFIG_RT5392_AP_WDS) || \
 defined(CONFIG_RT3572_AP_WDS) || defined(CONFIG_RT5572_AP_WDS) || \
