@@ -5,7 +5,7 @@
 menuconfig NET_SCHED
 	def_bool y
 	select NET_SCH_FIFO
-	select NET_SCH_FQ_CODEL
+	select NET_SCH_CAKE
 	---help---
 	  When the kernel has several packets to send out over a network
 	  device, it has to decide which ones to send first, which ones to
