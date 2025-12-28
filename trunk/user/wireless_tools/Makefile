@@ -154,7 +154,15 @@ $(DYNAMIC): $(OBJS:.o=.so)
 	ln -sf $(DYNAMIC) libiw.so
 
 romfs:
-	$(ROMFSINST) /bin/iwpriv
+	$(ROMFSINST) /bin/iwmulticall
+	$(ROMFSINST) -s iwmulticall /bin/iwconfig
+	$(ROMFSINST) -s iwmulticall /bin/iwlist
+	$(ROMFSINST) -s iwmulticall /bin/iwpriv
+	$(ROMFSINST) -s iwmulticall /bin/iwspy
+	$(ROMFSINST) -s iwmulticall /bin/iwgetid
+	$(ROMFSINST) -s iwmulticall /bin/iwevent
+	$(ROMFSINST) -s iwmulticall /bin/ifrename
+	$(ROMFSINST) /bin/macaddr
 ifndef BUILD_STATIC
 	$(ROMFSINST) -S /lib/$(DYNAMIC)
 	$(ROMFSINST) -s $(DYNAMIC) /lib/libiw.so
