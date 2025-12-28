@@ -17,6 +17,7 @@
 #include <linux/skbuff.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
+extern struct Qdisc_ops cake_qdisc_ops;
 
 struct mq_sched {
 	struct Qdisc		**qdiscs;
