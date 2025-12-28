@@ -34,6 +34,7 @@
 #include <net/sock.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
+extern struct Qdisc_ops cake_qdisc_ops;
 
 static int qdisc_notify(struct net *net, struct sk_buff *oskb,
 			struct nlmsghdr *n, u32 clid,
