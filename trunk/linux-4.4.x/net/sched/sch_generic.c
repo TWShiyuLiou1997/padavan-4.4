@@ -30,6 +30,7 @@
 #include <net/pkt_sched.h>
 #include <net/dst.h>
 
+extern struct Qdisc_ops cake_qdisc_ops;
 /* Qdisc to use by default */
 const struct Qdisc_ops *default_qdisc_ops = &cake_qdisc_ops;
 EXPORT_SYMBOL(default_qdisc_ops);
