@@ -17,7 +17,6 @@
 #include <linux/skbuff.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
-extern struct Qdisc_ops cake_qdisc_ops;
 
 struct mq_sched {
 	struct Qdisc		**qdiscs;
@@ -58,7 +57,7 @@ static int mq_init(struct Qdisc *sch, struct nlattr *opt)
 
 	for (ntx = 0; ntx < dev->num_tx_queues; ntx++) {
 		dev_queue = netdev_get_tx_queue(dev, ntx);
-		qdisc = qdisc_create_dflt(dev_queue, &cake_qdisc_ops,
+		qdisc = qdisc_create_dflt(dev_queue, &fq_codel_qdisc_ops,
 					  TC_H_MAKE(TC_H_MAJ(sch->handle),
 						    TC_H_MIN(ntx + 1)));
 		if (!qdisc)
