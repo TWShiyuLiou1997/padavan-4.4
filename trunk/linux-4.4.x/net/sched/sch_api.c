@@ -34,7 +34,6 @@
 #include <net/sock.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
-extern struct Qdisc_ops cake_qdisc_ops;
 
 static int qdisc_notify(struct net *net, struct sk_buff *oskb,
 			struct nlmsghdr *n, u32 clid,
@@ -1951,7 +1950,7 @@ static int __init pktsched_init(void)
 		return err;
 	}
 
-	register_qdisc(&cake_qdisc_ops);
+	register_qdisc(&fq_codel_qdisc_ops);
 	register_qdisc(&pfifo_qdisc_ops);
 	register_qdisc(&bfifo_qdisc_ops);
 	register_qdisc(&pfifo_head_drop_qdisc_ops);
