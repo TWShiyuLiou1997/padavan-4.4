@@ -3284,7 +3284,7 @@ static const struct Qdisc_class_ops cake_class_ops = {
 	.walk		=	cake_walk,
 };
 
-struct Qdisc_ops cake_qdisc_ops __read_mostly = {
+static struct Qdisc_ops cake_qdisc_ops __read_mostly = {
 	.cl_ops		=	&cake_class_ops,
 	.id		=	"cake",
 	.priv_size	=	sizeof(struct cake_sched_data),
