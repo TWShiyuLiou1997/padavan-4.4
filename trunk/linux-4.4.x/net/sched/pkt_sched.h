@@ -972,6 +972,4 @@ enum {
 	CAKE_ATM_MAX
 };
 
-extern struct Qdisc_ops cake_qdisc_ops;
-
 #endif
