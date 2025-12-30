@@ -6,7 +6,6 @@ menuconfig NET_SCHED
 	def_bool y
 	select NET_SCH_FIFO
 	select NET_SCH_FQ_CODEL
-	select NET_SCH_CAKE
 	---help---
 	  When the kernel has several packets to send out over a network
 	  device, it has to decide which ones to send first, which ones to
@@ -150,18 +149,6 @@ config NET_SCH_SFQ
 
 	  To compile this code as a module, choose M here: the
 	  module will be called sch_sfq.
-
-config NET_SCH_CAKE
-	tristate "Common Applications Kept Enhanced (CAKE)"
-        depends on NET_SCHED
-	help
-	  Say Y here if you want to use the Common Applications Kept Enhanced
-          (CAKE) queue management algorithm.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called sch_cake.
-
-	  If unsure, say N.
 
 config NET_SCH_TEQL
 	tristate "True Link Equalizer (TEQL)"
