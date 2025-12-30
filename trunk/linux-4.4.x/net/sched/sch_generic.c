@@ -30,9 +30,8 @@
 #include <net/pkt_sched.h>
 #include <net/dst.h>
 
-extern struct Qdisc_ops cake_qdisc_ops;
 /* Qdisc to use by default */
-const struct Qdisc_ops *default_qdisc_ops = &cake_qdisc_ops;
+const struct Qdisc_ops *default_qdisc_ops = &fq_codel_qdisc_ops;
 EXPORT_SYMBOL(default_qdisc_ops);
 
 /* Main transmission queue. */
@@ -603,7 +602,7 @@ static void attach_one_default_qdisc(struct net_device *dev,
 				     void *_unused)
 {
 	struct Qdisc *qdisc;
-	const struct Qdisc_ops *ops = &cake_qdisc_ops;
+	const struct Qdisc_ops *ops = &fq_codel_qdisc_ops;
 
 	if (dev->priv_flags & IFF_NO_QUEUE)
 		ops = &noqueue_qdisc_ops;
