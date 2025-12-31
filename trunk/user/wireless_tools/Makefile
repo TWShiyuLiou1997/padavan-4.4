@@ -50,11 +50,11 @@ WEXT_HEADER = wireless.$(WE_VERSION).h
 # Targets to build
 STATIC=libiw.a
 DYNAMIC=libiw.so.$(WT_VERSION)
-PROGS= iwconfig iwlist iwpriv iwspy iwgetid iwevent ifrename macaddr iwmulticall
+PROGS= iwconfig iwlist iwpriv iwspy iwgetid iwevent ifrename
 MANPAGES8=iwconfig.8 iwlist.8 iwpriv.8 iwspy.8 iwgetid.8 iwevent.8 ifrename.8
 MANPAGES7=wireless.7
 MANPAGES5=iftab.5
-EXTRAPROGS=
+EXTRAPROGS= macaddr iwmulticall
 
 # Composition of the library :
 OBJS = iwlib.o
@@ -154,14 +154,13 @@ $(DYNAMIC): $(OBJS:.o=.so)
 	ln -sf $(DYNAMIC) libiw.so
 
 romfs:
-	$(ROMFSINST) /bin/iwmulticall
-	$(ROMFSINST) -s iwmulticall /bin/iwconfig
-	$(ROMFSINST) -s iwmulticall /bin/iwlist
-	$(ROMFSINST) -s iwmulticall /bin/iwpriv
-	$(ROMFSINST) -s iwmulticall /bin/iwspy
-	$(ROMFSINST) -s iwmulticall /bin/iwgetid
-	$(ROMFSINST) -s iwmulticall /bin/iwevent
-	$(ROMFSINST) -s iwmulticall /bin/ifrename
+	$(ROMFSINST) /bin/iwpriv
+	$(ROMFSINST) /bin/iwconfig
+	$(ROMFSINST) /bin/iwlist
+	$(ROMFSINST) /bin/iwspy
+	$(ROMFSINST) /bin/iwgetid
+	$(ROMFSINST) /bin/iwevent
+	$(ROMFSINST) /bin/ifrename
 	$(ROMFSINST) /bin/macaddr
 ifndef BUILD_STATIC
 	$(ROMFSINST) -S /lib/$(DYNAMIC)
