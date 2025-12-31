@@ -150,6 +150,10 @@ jobs:
             sed -i "/CONFIG_FIRMWARE_INCLUDE_${kmod}/d" "$TARGET_FILE"
             echo "CONFIG_FIRMWARE_INCLUDE_${kmod}=y" >> "$TARGET_FILE"
           done
+
+          # 👇👇👇 新增這行來修復 wireless_tools 編譯錯誤 👇👇👇
+          sed -i '/int.*iw_ether_ntop/a void iw_saether_ntop(const struct sockaddr *sap, char *buf);' /opt/rt-n56u/trunk/user/wireless_tools/iwlib.h
+          # 👆👆👆 新增結束 👆👆👆
           
           cp -f "$TARGET_FILE" "$TRUNK_CONFIG"
 
