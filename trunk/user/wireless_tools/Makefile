@@ -161,7 +161,6 @@ romfs:
 	$(ROMFSINST) /bin/iwgetid
 	$(ROMFSINST) /bin/iwevent
 	$(ROMFSINST) /bin/ifrename
-	$(ROMFSINST) /bin/macaddr
 ifndef BUILD_STATIC
 	$(ROMFSINST) -S /lib/$(DYNAMIC)
 	$(ROMFSINST) -s $(DYNAMIC) /lib/libiw.so
