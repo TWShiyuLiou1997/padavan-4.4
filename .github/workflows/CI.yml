@@ -66,13 +66,6 @@ jobs:
           echo "BUILD_TIME=$(TZ='Asia/Taipei' date +%Y%m%d-%H%M)" >> $GITHUB_ENV
           mkdir -p /opt/images/
 
-      - name: 💾-Set-up-ccache
-        uses: hendrikmuhs/ccache-action@main
-        with:
-          key: ${{ runner.os }}-ccache-${{ inputs.target_select }}-${{ hashFiles('trunk/configs/templates/*.config') }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-${{ inputs.target_select }}-
-
       - name: 🔎-Export-Custom-Variables
         run: |
           jq empty <<< '${{ inputs.customization }}' || { echo "❌ Invalid JSON"; exit 1; }
