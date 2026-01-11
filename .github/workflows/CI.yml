@@ -169,67 +169,81 @@ jobs:
           ARP_ROOT="$BASE_DIR/arptables"
           
           # ========================================
-          # 1. Ebtables v2.0.11 (SRC目錄 + -Os 優化 + 明確指定檔名)
+          # 1. Ebtables v2.0.11 (Anti-Segfault: O2 + Static)
           # ========================================
-          echo "⬇️ Upgrading Ebtables to v2.0.11..."
+          echo "⬇️ Upgrading Ebtables to v2.0.11 (Fixing Segfault)..."
+          
+          # 清理並重建目錄
           rm -rf "$EBT_ROOT"
           mkdir -p "$EBT_ROOT"
           cd "$EBT_ROOT" || exit 1
           
+          # 下載 v2.0.11
           wget --no-check-certificate "https://www.netfilter.org/pub/ebtables/ebtables-2.0.11.tar.gz" -O src.tar.gz
           tar -xf src.tar.gz
           rm -f src.tar.gz
-          # Ebtables 統一改名為 src，方便 Makefile 撰寫
           mv ebtables-2.0.11 src
           
-          echo "🔧 Creating Ebtables Wrapper Makefile..."
+          echo "🔧 Creating Translation Layer (Wrapper Makefile)..."
           
-          # [Ebtables] 使用靜態寫入 (EOF 加引號)
+          # [修正版 Makefile] 
+          # 1. 改用 -O2 防止 MIPS 指令錯亂
+          # 2. 移除 ?= 讓它無視外部變數，強制生效
           cat << 'EOF' > Makefile
           SRC_NAME = src
-          CC ?= gcc
-          CFLAGS ?= -Os
-          LDFLAGS ?= -s
           
+          # 繼承 Padavan 編譯器 (cc/gcc)
+          CC ?= gcc
+          
+          # ⚠️ 關鍵修正：強制使用 -O2，絕對不要用 -Os
+          # -static: 確保不依賴外部動態庫 (減少相容性問題)
+          # -Wall: 顯示更多警告以便除錯
+          MY_CFLAGS = -O2 -static -Wall
+          MY_LDFLAGS = -static
+          
+          # 設定 configure
+          # 注意：這裡直接將 CFLAGS 寫死傳入，確保 configure 收到正確參數
           CONFIGURE_CMD = ./configure \
                           --host=mipsel-linux \
                           --prefix=/usr \
                           --sbindir=/sbin \
                           --disable-shared \
                           --enable-static \
-                          CFLAGS="$(CFLAGS) -static" \
-                          LDFLAGS="$(LDFLAGS) -static"
+                          CFLAGS="$(MY_CFLAGS)" \
+                          LDFLAGS="$(MY_LDFLAGS)"
           
           all:
-          	@echo "👉 [Ebtables] Checking configuration..."
+          	@echo "👉 [Wrapper] Checking configuration (Force O2)..."
           	@if [ ! -f $(SRC_NAME)/Makefile ]; then \
-          		echo "👉 [Ebtables] Running configure..."; \
+          		echo "👉 [Wrapper] Running configure..."; \
           		(cd $(SRC_NAME) && $(CONFIGURE_CMD)); \
           	fi
-          	@echo "👉 [Ebtables] Building static binary..."
+          	@echo "👉 [Wrapper] Building static binary..."
           	$(MAKE) -C $(SRC_NAME) all
-          	@echo "========================================"
-          	@echo "🔎 DEBUG: Listing compiled files in $(SRC_NAME):"
-          	@ls -l $(SRC_NAME)/ebtables* 2>/dev/null || ls -l $(SRC_NAME)/
-          	@echo "========================================"
           
           clean:
-          	@if [ -f $(SRC_NAME)/Makefile ]; then $(MAKE) -C $(SRC_NAME) clean; fi
+          	@if [ -f $(SRC_NAME)/Makefile ]; then \
+          		$(MAKE) -C $(SRC_NAME) clean; \
+          	fi
           
           romfs:
           	@echo "👉 [Ebtables] Installing to ROMFS..."
-          	# 已確認 v2.0.11 產出檔名為 ebtables-legacy，直接安裝
+          	# 確保二進位檔存在 (v2.0.11 編譯出來通常叫 ebtables-legacy)
           	$(ROMFSINST) $(SRC_NAME)/ebtables-legacy /bin/ebtables
+          	
+          	# ⚠️ 絕對不能漏掉這個！
+          	# Ebtables 如果找不到 ethertypes 對照表，某些版本也會直接 Segfault
           	$(ROMFSINST) $(SRC_NAME)/ethertypes /etc_ro/ethertypes
           EOF
           
+          echo "✅ Ebtables v2.0.11 setup complete."
+          
           # ========================================
-          # 2. Arptables (關鍵修正：Config 開關 + Legacy 命名)
+          # 2. Arptables (修復 Tab 匹配問題 + 確保名單有它)
           # ========================================
           echo "⬇️ Processing Arptables..."
           
-          # [關鍵步驟 A] 確保 Userland Config 開啟 Arptables
-          # 如果這個不開，make 到了 trunk/user 這一層就會直接跳過 arptables 目錄
+          # [步驟 A] 確保 Userland Config 開啟
           USER_CONFIG="/opt/rt-n56u/trunk/.config"
           if [ -f "$USER_CONFIG" ]; then
               echo "🔧 Enabling CONFIG_USER_ARPTABLES in Userland .config..."
@@ -242,23 +256,19 @@ jobs:
           mkdir -p "$ARP_ROOT"
           cd "$ARP_ROOT" || exit 1
           
-          # 下載源碼 (保持 v0.0.5)
+          # 下載源碼
           if [ ! -f "Makefile" ] || ! grep -q "arptables" "Makefile"; then
             wget --no-check-certificate "https://www.netfilter.org/pub/arptables/arptables-0.0.5.tar.gz" -O src.tar.gz
-            tar -xf src.tar.gz
-            rm -f src.tar.gz
+            tar -xf src.tar.gz && rm -f src.tar.gz
             
             ARP_SRC_NAME=$(ls -d arptables-0*/ | head -n 1 | sed 's/\///')
-            echo "   Detected source directory: [$ARP_SRC_NAME]"
             chmod -R u+w "$ARP_SRC_NAME"
             
             echo "🔧 Creating Arptables Wrapper Makefile..."
             
-            # [關鍵步驟 B] Wrapper 負責產出 arptables-legacy
-            # 即使源碼預設產出 arptables，我們這裡強行 mv 把它變成 legacy
+            # [步驟 B] Wrapper
             cat << EOF > Makefile
           SRC_NAME=$ARP_SRC_NAME
-          
           all:
           	\$(MAKE) -C \$(SRC_NAME) \
           		CC="\$(CC)" \
@@ -266,25 +276,41 @@ jobs:
           		COPT_FLAGS="-Os -static" \
           		LDFLAGS="-static" \
           		all
-          	@# 強制確保 legacy 檔案存在，滿足你的預期
           	@if [ -f \$(SRC_NAME)/arptables ] && [ ! -f \$(SRC_NAME)/arptables-legacy ]; then \
           		cp \$(SRC_NAME)/arptables \$(SRC_NAME)/arptables-legacy; \
           	fi
-          
           romfs:
-          	@echo "👉 [Arptables] Installing to ROMFS..."
           	\$(ROMFSINST) \$(SRC_NAME)/arptables-legacy /bin/arptables
-          
           clean:
           	\$(MAKE) -C \$(SRC_NAME) clean
           	rm -f \$(SRC_NAME)/arptables-legacy
           EOF
           
-            # [關鍵步驟 C] 註冊目錄
+            # [步驟 C] 註冊目錄 (針對 Tab 優化)
+            echo "🔧 Registering arptables in trunk/user/Makefile..."
             cd "$BASE_DIR" || exit 1
-            if ! grep -q "dir_y += arptables" Makefile; then
-                sed -i '/dir_y += ebtables/a dir_y += arptables' Makefile 2>/dev/null || echo "dir_y += arptables" >> Makefile
+            
+            # 1. 先備份一下
+            cp Makefile Makefile.bak
+            
+            # 2. 使用 .* 來忽略空格或 Tab 的差異，確保抓得到 ebtables 那一行
+            #    如果 Makefile 裡沒有 arptables，就插在 ebtables 後面
+            if ! grep -q "dir_y.*+=.*arptables" Makefile; then
+                sed -i '/dir_y.*+=.*ebtables/a dir_y += arptables' Makefile
+            else
+                echo "⚠️ Arptables already in Makefile."
             fi
+
+            # 3. [雙重保險] 如果 sed 還是失敗，直接追加到檔案最後面 (但是在 all: 之前)
+            if ! grep -q "dir_y.*+=.*arptables" Makefile; then
+                echo "⚠️ Sed failed, forcing append..."
+                # 這裡比較暴力，直接插在 busybox 後面 (busybox 肯定在最前面)
+                sed -i '/dir_y.*+=.*busybox/a dir_y += arptables' Makefile
+            fi
+            
+            # 4. [驗證] 印出結果給你看，讓你放心
+            echo "🔎 Checking Makefile content for arptables:"
+            grep "arptables" Makefile || echo "❌ ERROR: Arptables install failed!"
           fi
           
           # ========================================
