@@ -224,50 +224,63 @@ jobs:
           EOF
           
           # ========================================
-          # 2. Arptables v0.0.5 (變數擴展 + 明確指定檔名)
+          # 2. Arptables (關鍵修正：Config 開關 + Legacy 命名)
           # ========================================
           echo "⬇️ Processing Arptables..."
+          
+          # [關鍵步驟 A] 確保 Userland Config 開啟 Arptables
+          # 如果這個不開，make 到了 trunk/user 這一層就會直接跳過 arptables 目錄
+          USER_CONFIG="/opt/rt-n56u/trunk/.config"
+          if [ -f "$USER_CONFIG" ]; then
+              echo "🔧 Enabling CONFIG_USER_ARPTABLES in Userland .config..."
+              sed -i 's/^CONFIG_USER_ARPTABLES=.*/CONFIG_USER_ARPTABLES=y/' "$USER_CONFIG"
+              if ! grep -q "CONFIG_USER_ARPTABLES=y" "$USER_CONFIG"; then
+                  echo "CONFIG_USER_ARPTABLES=y" >> "$USER_CONFIG"
+              fi
+          fi
+
           mkdir -p "$ARP_ROOT"
           cd "$ARP_ROOT" || exit 1
           
+          # 下載源碼 (保持 v0.0.5)
           if [ ! -f "Makefile" ] || ! grep -q "arptables" "Makefile"; then
             wget --no-check-certificate "https://www.netfilter.org/pub/arptables/arptables-0.0.5.tar.gz" -O src.tar.gz
             tar -xf src.tar.gz
             rm -f src.tar.gz
             
-            # 抓取變動的目錄名稱
             ARP_SRC_NAME=$(ls -d arptables-0*/ | head -n 1 | sed 's/\///')
             echo "   Detected source directory: [$ARP_SRC_NAME]"
             chmod -R u+w "$ARP_SRC_NAME"
-          
+            
             echo "🔧 Creating Arptables Wrapper Makefile..."
             
-            # [Arptables] 使用變數擴展寫入 (EOF 無引號)
+            # [關鍵步驟 B] Wrapper 負責產出 arptables-legacy
+            # 即使源碼預設產出 arptables，我們這裡強行 mv 把它變成 legacy
             cat << EOF > Makefile
           SRC_NAME=$ARP_SRC_NAME
+          
           all:
           	\$(MAKE) -C \$(SRC_NAME) \
           		CC="\$(CC)" \
-          		AR="\$(AR)" \
           		KERNEL_DIR=\$(KERNEL_HEADERS_PATH) \
           		COPT_FLAGS="-Os -static" \
           		LDFLAGS="-static" \
-          		arptables-legacy
-          	@echo "========================================"
-          	@echo "🔎 DEBUG: Listing compiled files in \$(SRC_NAME):"
-          	@ls -l \$(SRC_NAME)/arptables* 2>/dev/null || ls -l \$(SRC_NAME)/
-          	@echo "========================================"
+          		all
+          	@# 強制確保 legacy 檔案存在，滿足你的預期
+          	@if [ -f \$(SRC_NAME)/arptables ] && [ ! -f \$(SRC_NAME)/arptables-legacy ]; then \
+          		cp \$(SRC_NAME)/arptables \$(SRC_NAME)/arptables-legacy; \
+          	fi
           
           romfs:
           	@echo "👉 [Arptables] Installing to ROMFS..."
-          	# 已確認 v0.0.5 產出檔名為 arptables-legacy，直接安裝
           	\$(ROMFSINST) \$(SRC_NAME)/arptables-legacy /bin/arptables
           
           clean:
           	\$(MAKE) -C \$(SRC_NAME) clean
+          	rm -f \$(SRC_NAME)/arptables-legacy
           EOF
           
-            echo "🔧 Registering arptables in trunk/user/Makefile..."
+            # [關鍵步驟 C] 註冊目錄
             cd "$BASE_DIR" || exit 1
             if ! grep -q "dir_y += arptables" Makefile; then
                 sed -i '/dir_y += ebtables/a dir_y += arptables' Makefile 2>/dev/null || echo "dir_y += arptables" >> Makefile
@@ -275,10 +288,8 @@ jobs:
           fi
           
           # ========================================
-          # 3. 核心支援 (究極嚴謹 Kernel Config)
+          # 3. 核心模組支援 (Kernel Config)
           # ========================================
-          echo "🔧 Deep-Cleaning & Enabling Kernel modules..."
-          # 注意：路徑適配 /opt/rt-n56u
           cd "/opt/rt-n56u"
           TARGET_KCONF="trunk/linux-4.4.x/.config"
           
@@ -287,10 +298,8 @@ jobs:
              for mod in $MODULES; do
                 if grep -q "$mod" "$TARGET_KCONF"; then
                    sed -i "s|^.*$mod.*$|$mod=m|" "$TARGET_KCONF"
-                   echo "   ✅ Forced $mod=m (Updated)"
                 else
                    echo "$mod=m" >> "$TARGET_KCONF"
-                   echo "   ✅ Forced $mod=m (Added)"
                 fi
              done
           fi
