@@ -20,13 +20,13 @@ on:
         description: "是否執行極限瘦身"
         type: boolean
         default: false
-        
+      
       customization:
         description: '自定義配置 JSON'
         required: true
         type: string
         default: '{"lanip":"192.168.0.1","signaccount":"admin","signpassword":"admin","wifi2gssid":"Padavan","wifi2gpsk":"1234567890","wifi5gssid":"Padavan-5G","wifi5gpsk":"1234567890"}'
-        
+      
       toolchain_select:
         description: "選擇編譯工具鏈"
         required: true
@@ -48,7 +48,7 @@ jobs:
     steps:
       - name: 📥-Checkout-Repository
         uses: actions/checkout@master
-        
+      
       - name: 🚀-Install-Dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -76,6 +76,221 @@ jobs:
       - name: ⬇️-Clone-Source-Code
         run: |
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
+
+      # =======================================================
+      # [新增] iptables 1.8.11 升級與修復 (路徑適配 /opt/rt-n56u)
+      # =======================================================
+      - name: 🔥 Auto Upgrade iptables 1.8.11 & Patch
+        run: |
+          echo "::group::Iptables Upgrade & Patching"
+          NEW_VER="iptables-1.8.11"
+          OLD_VER_STR="iptables-1.8.10"
+          
+          # --- Part 1: 處理 iptables 本體 ---
+          # 注意：路徑已修正為 /opt/rt-n56u
+          IPT_MAKEFILE=$(find /opt/rt-n56u/trunk/user/iptables -name Makefile | head -n 1)
+          IPT_DIR=$(dirname "$IPT_MAKEFILE")
+          echo "✅ 鎖定 iptables Makefile: $IPT_MAKEFILE"
+          
+          # 1. 修改版本號
+          sed -i "s/SRC_NAME=$OLD_VER_STR/SRC_NAME=$NEW_VER/g" "$IPT_MAKEFILE"
+          
+          # 2. 恢復正常的構建流程
+          sed -i 's/^all: config_test/all: download_test extract_test config_test/' "$IPT_MAKEFILE"
+          
+          # 3. 移除 autogen.sh
+          sed -i '/.\/autogen.sh/d' "$IPT_MAKEFILE"
+          
+          # 4. 清理過時指令
+          sed -i '/extensions\/disabled\//d' "$IPT_MAKEFILE"
+
+          # 5. 生成屏蔽警告的補丁
+          cat << 'EOF' > "$IPT_DIR/999-suppress-warnings.patch"
+          --- a/libxtables/xtables.c
+          +++ b/libxtables/xtables.c
+          @@ -809,9 +809,11 @@
+           		dptr = &((*dptr)->next);
+           	}
+           
+          +#if 0
+           	if (seen && !found)
+           		fprintf(stderr,
+           			"Warning: Extension %s is not supported, missing kernel module?\n",
+           			name);
+          +#endif
+           
+           	for (ptr = xtables_matches; ptr; ptr = ptr->next) {
+          @@ -939,9 +941,11 @@
+           		dptr = &((*dptr)->next);
+           	}
+           
+          +#if 0
+           	if (seen && !found)
+           		fprintf(stderr,
+           			"Warning: Extension %s is not supported, missing kernel module?\n",
+           			name);
+          +#endif
+           
+           	for (ptr = xtables_targets; ptr; ptr = ptr->next) {
+          EOF
+          
+          # 6. 注入補丁應用邏輯
+          sed -i 's|tar xJf $(SRC_NAME).tar.xz;|tar xJf $(SRC_NAME).tar.xz \&\& patch -d $(SRC_NAME) -p1 < 999-suppress-warnings.patch;|' "$IPT_MAKEFILE"
+          
+          echo "✅ Iptables 本體修復完成。"
+
+          # --- Part 2: 修復所有依賴舊版 iptables 的其他軟體 ---
+          echo "🔍 開始掃描並修復依賴舊版 iptables 的其他套件..."
+          
+          # 搜尋 /opt/rt-n56u/trunk/user 下所有含有 "iptables-1.8.10" 字串的 Makefile
+          grep -rl "$OLD_VER_STR" /opt/rt-n56u/trunk/user/ | while read -r file ; do
+              echo "  - 修復路徑: $file"
+              sed -i "s/$OLD_VER_STR/$NEW_VER/g" "$file"
+          done
+          
+          echo "🎉 全局路徑替換完成！所有套件現在都指向 $NEW_VER"
+          echo "::endgroup::"
+
+      # =======================================================
+      # [新增] 網路工具升級 v31 (路徑適配 /opt/rt-n56u)
+      # =======================================================
+      - name: 🔥 Network Tools (Smart Compile & Robust Kernel Config)
+        run: |
+          echo "::group::Smart Compile Network Tools"
+          
+          # === 設定路徑 (適配此 workflow) ===
+          BASE_DIR="/opt/rt-n56u/trunk/user"
+          EBT_ROOT="$BASE_DIR/ebtables"
+          ARP_ROOT="$BASE_DIR/arptables"
+          
+          # ========================================
+          # 1. Ebtables v2.0.11 (SRC目錄 + -Os 優化 + 明確指定檔名)
+          # ========================================
+          echo "⬇️ Upgrading Ebtables to v2.0.11..."
+          rm -rf "$EBT_ROOT"
+          mkdir -p "$EBT_ROOT"
+          cd "$EBT_ROOT" || exit 1
+          
+          wget --no-check-certificate "https://www.netfilter.org/pub/ebtables/ebtables-2.0.11.tar.gz" -O src.tar.gz
+          tar -xf src.tar.gz
+          rm -f src.tar.gz
+          # Ebtables 統一改名為 src，方便 Makefile 撰寫
+          mv ebtables-2.0.11 src
+          
+          echo "🔧 Creating Ebtables Wrapper Makefile..."
+          
+          # [Ebtables] 使用靜態寫入 (EOF 加引號)
+          cat << 'EOF' > Makefile
+          SRC_NAME = src
+          CC ?= gcc
+          CFLAGS ?= -Os
+          LDFLAGS ?= -s
+          
+          CONFIGURE_CMD = ./configure \
+                          --host=mipsel-linux \
+                          --prefix=/usr \
+                          --sbindir=/sbin \
+                          --disable-shared \
+                          --enable-static \
+                          CFLAGS="$(CFLAGS) -static" \
+                          LDFLAGS="$(LDFLAGS) -static"
+          
+          all:
+          	@echo "👉 [Ebtables] Checking configuration..."
+          	@if [ ! -f $(SRC_NAME)/Makefile ]; then \
+          		echo "👉 [Ebtables] Running configure..."; \
+          		(cd $(SRC_NAME) && $(CONFIGURE_CMD)); \
+          	fi
+          	@echo "👉 [Ebtables] Building static binary..."
+          	$(MAKE) -C $(SRC_NAME) all
+          	@echo "========================================"
+          	@echo "🔎 DEBUG: Listing compiled files in $(SRC_NAME):"
+          	@ls -l $(SRC_NAME)/ebtables* 2>/dev/null || ls -l $(SRC_NAME)/
+          	@echo "========================================"
+          
+          clean:
+          	@if [ -f $(SRC_NAME)/Makefile ]; then $(MAKE) -C $(SRC_NAME) clean; fi
+          
+          romfs:
+          	@echo "👉 [Ebtables] Installing to ROMFS..."
+          	# 已確認 v2.0.11 產出檔名為 ebtables-legacy，直接安裝
+          	$(ROMFSINST) $(SRC_NAME)/ebtables-legacy /bin/ebtables
+          	$(ROMFSINST) $(SRC_NAME)/ethertypes /etc_ro/ethertypes
+          EOF
+          
+          # ========================================
+          # 2. Arptables v0.0.5 (變數擴展 + 明確指定檔名)
+          # ========================================
+          echo "⬇️ Processing Arptables..."
+          mkdir -p "$ARP_ROOT"
+          cd "$ARP_ROOT" || exit 1
+          
+          if [ ! -f "Makefile" ] || ! grep -q "arptables" "Makefile"; then
+            wget --no-check-certificate "https://www.netfilter.org/pub/arptables/arptables-0.0.5.tar.gz" -O src.tar.gz
+            tar -xf src.tar.gz
+            rm -f src.tar.gz
+            
+            # 抓取變動的目錄名稱
+            ARP_SRC_NAME=$(ls -d arptables-0*/ | head -n 1 | sed 's/\///')
+            echo "   Detected source directory: [$ARP_SRC_NAME]"
+            chmod -R u+w "$ARP_SRC_NAME"
+          
+            echo "🔧 Creating Arptables Wrapper Makefile..."
+            
+            # [Arptables] 使用變數擴展寫入 (EOF 無引號)
+            cat << EOF > Makefile
+          SRC_NAME=$ARP_SRC_NAME
+          all:
+          	\$(MAKE) -C \$(SRC_NAME) \
+          		CC="\$(CC)" \
+          		AR="\$(AR)" \
+          		KERNEL_DIR=\$(KERNEL_HEADERS_PATH) \
+          		COPT_FLAGS="-Os -static" \
+          		LDFLAGS="-static" \
+          		arptables-legacy
+          	@echo "========================================"
+          	@echo "🔎 DEBUG: Listing compiled files in \$(SRC_NAME):"
+          	@ls -l \$(SRC_NAME)/arptables* 2>/dev/null || ls -l \$(SRC_NAME)/
+          	@echo "========================================"
+          
+          romfs:
+          	@echo "👉 [Arptables] Installing to ROMFS..."
+          	# 已確認 v0.0.5 產出檔名為 arptables-legacy，直接安裝
+          	\$(ROMFSINST) \$(SRC_NAME)/arptables-legacy /bin/arptables
+          
+          clean:
+          	\$(MAKE) -C \$(SRC_NAME) clean
+          EOF
+          
+            echo "🔧 Registering arptables in trunk/user/Makefile..."
+            cd "$BASE_DIR" || exit 1
+            if ! grep -q "dir_y += arptables" Makefile; then
+                sed -i '/dir_y += ebtables/a dir_y += arptables' Makefile 2>/dev/null || echo "dir_y += arptables" >> Makefile
+            fi
+          fi
+          
+          # ========================================
+          # 3. 核心支援 (究極嚴謹 Kernel Config)
+          # ========================================
+          echo "🔧 Deep-Cleaning & Enabling Kernel modules..."
+          # 注意：路徑適配 /opt/rt-n56u
+          cd "/opt/rt-n56u"
+          TARGET_KCONF="trunk/linux-4.4.x/.config"
+          
+          if [ -f "$TARGET_KCONF" ]; then
+             MODULES="CONFIG_IP_NF_ARPTABLES CONFIG_IP_NF_ARPFILTER CONFIG_IP_NF_ARP_MANGLE CONFIG_NF_LOG_ARP CONFIG_BRIDGE_EBT_ARP CONFIG_BRIDGE_EBT_ARPREPLY"
+             for mod in $MODULES; do
+                if grep -q "$mod" "$TARGET_KCONF"; then
+                   sed -i "s|^.*$mod.*$|$mod=m|" "$TARGET_KCONF"
+                   echo "   ✅ Forced $mod=m (Updated)"
+                else
+                   echo "$mod=m" >> "$TARGET_KCONF"
+                   echo "   ✅ Forced $mod=m (Added)"
+                fi
+             done
+          fi
+          
+          echo "::endgroup::"
 
       - name: ⬇️-Prepare-Toolchain
         env:
@@ -177,13 +392,67 @@ jobs:
           FOUND_FILE=$(find images -name "*.trx" | head -n 1)
           if [ -z "$FOUND_FILE" ]; then echo "::error::未產出 TRX 檔案"; exit 1; fi
           sudo mv -f "$FOUND_FILE" "/opt/images/$FINAL_FILENAME"
-          echo "FINAL_FILE_PATH=/opt/images/$FINAL_FILENAME" >> $GITHUB_ENV
+          echo "FINAL_FILENAME=$FINAL_FILENAME" >> $GITHUB_ENV
+
+      # =======================================================
+      # [修改] 智慧打包 (Debug追蹤 + 產物收集)
+      # =======================================================
+      - name: 📦-Smart-Pack-Artifacts-Debug
+        run: |
+          echo "::group::Smart Packing & Debug Collection"
+          
+          # 定義路徑 (適配 /opt/rt-n56u)
+          WORK_DIR="/opt/rt-n56u"
+          PACK_DIR="/opt/images/output_pack"
+          IMAGES_DIR="/opt/images"
+          
+          mkdir -p "$PACK_DIR"
+          
+          # 1. 收集關鍵配置與日誌
+          echo "Collecting Configs and Logs..."
+          [ -f "$WORK_DIR/trunk/.config" ] && cp "$WORK_DIR/trunk/.config" "$PACK_DIR/build.config"
+          [ -f "$WORK_DIR/trunk/user/shared/defaults.h" ] && cp "$WORK_DIR/trunk/user/shared/defaults.h" "$PACK_DIR/defaults.h.txt"
+          [ -f "$WORK_DIR/trunk/linux-4.4.x/.config" ] && cp "$WORK_DIR/trunk/linux-4.4.x/.config" "$PACK_DIR/kernel.config"
+          # 注意：此腳本的 build log 可能由 CI 系統接管，這邊嘗試找常見位置
+          [ -f "$WORK_DIR/trunk/build.log" ] && cp "$WORK_DIR/trunk/build.log" "$PACK_DIR/build.log"
+
+          # 2. 收集 iptables Debug 檔案
+          mkdir -p "$PACK_DIR/debug_iptables"
+          IPT_BASE_DIR="$WORK_DIR/trunk/user/iptables"
+          IPT_SRC_DIR="$IPT_BASE_DIR/iptables-1.8.11"
+          
+          if [ -f "$IPT_BASE_DIR/999-suppress-warnings.patch" ]; then
+              cp "$IPT_BASE_DIR/999-suppress-warnings.patch" "$PACK_DIR/debug_iptables/"
+          fi
+          if [ -f "$IPT_SRC_DIR/libxtables/xtables.c" ]; then
+              cp "$IPT_SRC_DIR/libxtables/xtables.c" "$PACK_DIR/debug_iptables/xtables_patched.c"
+          fi
+
+          # 3. 移動韌體檔案到打包目錄
+          if [ -f "$IMAGES_DIR/${{ env.FINAL_FILENAME }}" ]; then
+             cp "$IMAGES_DIR/${{ env.FINAL_FILENAME }}" "$PACK_DIR/"
+          else
+             echo "::warning:: Firmware file not found in images dir!"
+          fi
+
+          # 4. 生成 MD5
+          cd "$PACK_DIR"
+          md5sum * > md5sum.txt 2>/dev/null || true
+          
+          # 5. 打包 Zip
+          cd "/opt/images"
+          ZIP_NAME="Padavan-${{ env.REAL_MODEL }}-${{ env.BUILD_TIME }}.zip"
+          zip -j -r "$ZIP_NAME" "$PACK_DIR"
+          
+          # 設定環境變數供 Upload 與 Release 使用
+          echo "FINAL_ZIP_PATH=/opt/images/$ZIP_NAME" >> $GITHUB_ENV
+          echo "::endgroup::"
 
       - name: 📦-Upload-Artifacts
         uses: actions/upload-artifact@master
         with:
           name: ${{ inputs.target_select }}-${{ env.BUILD_TIME }}
-          path: /opt/images
+          path: ${{ env.FINAL_ZIP_PATH }}
 
       - name: 🏷️-Set-Release-Tag
         if: github.event_name == 'workflow_dispatch'
@@ -199,11 +468,16 @@ jobs:
           tag: ${{ env.TAG_NAME }}
           name: Build ${{ inputs.target_select }} (${{ env.BUILD_TIME }})
           body: |
-            **Padavan 編譯報告**
+            **Padavan 編譯報告 (Enhanced)**
             * 機型: ${{ inputs.target_select }}
             * 時間: ${{ env.BUILD_TIME }}
             * LAN IP: ${{ env.LANIP }}
             * 工具鏈: ${{ inputs.toolchain_select }}
-          artifacts: ${{ env.FINAL_FILE_PATH }}
+            
+            ### 包含內容
+            * 韌體檔案 (.trx)
+            * 系統配置 (build.config, kernel.config)
+            * Debug 資訊 (defaults.h, iptables patch check)
+          artifacts: ${{ env.FINAL_ZIP_PATH }}
           allowUpdates: true
           artifactErrorsFailBuild: true
