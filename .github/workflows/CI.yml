@@ -78,27 +78,32 @@ jobs:
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
 
       # =======================================================
-      # [新增] iptables 1.8.11 升級與修復 (路徑適配 /opt/rt-n56u)
+      # [修正版] iptables 升級與修復 (精準匹配 1.8.7)
       # =======================================================
       - name: 🔥 Auto Upgrade iptables 1.8.11 & Patch
         run: |
           echo "::group::Iptables Upgrade & Patching"
           NEW_VER="iptables-1.8.11"
-          OLD_VER_STR="iptables-1.8.10"
           
-          # --- Part 1: 處理 iptables 本體 ---
-          # 注意：路徑已修正為 /opt/rt-n56u
+          # 1. 鎖定 Makefile 路徑並偵測舊版本
           IPT_MAKEFILE=$(find /opt/rt-n56u/trunk/user/iptables -name Makefile | head -n 1)
           IPT_DIR=$(dirname "$IPT_MAKEFILE")
-          echo "✅ 鎖定 iptables Makefile: $IPT_MAKEFILE"
           
-          # 1. 修改版本號
-          sed -i "s/SRC_NAME=$OLD_VER_STR/SRC_NAME=$NEW_VER/g" "$IPT_MAKEFILE"
+          # 從 Makefile 裡面抓出目前的版本 (例如 iptables-1.8.7)
+          OLD_VER_STR=$(grep -o 'iptables-[0-9.]*' "$IPT_MAKEFILE" | head -n 1)
+          echo "✅ 偵測到舊版本: $OLD_VER_STR"
+          echo "✅ 準備升級至: $NEW_VER"
+
+          # 2. 修改主 Makefile 的版本號
+          sed -i "s/$OLD_VER_STR/$NEW_VER/g" "$IPT_MAKEFILE"
           
-          # 2. 恢復正常的構建流程
-          sed -i 's/^all: config_test/all: download_test extract_test config_test/' "$IPT_MAKEFILE"
+          # 3. 注入下載與解壓邏輯 (因為原本的 Makefile 沒寫下載)
+          # 在 all: 目標前插入下載指令
+          cd "$IPT_DIR"
+          wget --no-check-certificate "https://www.netfilter.org/projects/iptables/files/${NEW_VER}.tar.xz"
+          tar -xJf "${NEW_VER}.tar.xz"
           
-          # 3. 移除 autogen.sh
+          # 4. 移除 autogen.sh 調用 (Release 版不需要，且常報錯)
           sed -i '/.\/autogen.sh/d' "$IPT_MAKEFILE"
           
           # 4. 清理過時指令
@@ -142,7 +147,7 @@ jobs:
           # --- Part 2: 修復所有依賴舊版 iptables 的其他軟體 ---
           echo "🔍 開始掃描並修復依賴舊版 iptables 的其他套件..."
           
-          # 搜尋 /opt/rt-n56u/trunk/user 下所有含有 "iptables-1.8.10" 字串的 Makefile
+          # 搜尋 /opt/rt-n56u/trunk/user 下所有含有 "iptables-1.8.7" 字串的 Makefile
           grep -rl "$OLD_VER_STR" /opt/rt-n56u/trunk/user/ | while read -r file ; do
               echo "  - 修復路徑: $file"
               sed -i "s/$OLD_VER_STR/$NEW_VER/g" "$file"
