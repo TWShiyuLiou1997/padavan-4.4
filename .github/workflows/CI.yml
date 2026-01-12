@@ -78,6 +78,99 @@ jobs:
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
 
       # =======================================================
+      # [新增] Libmnl 升級至 1.0.5 (混合 C2 架構 + 官方源碼)
+      # =======================================================
+      - name: 🔥 Upgrade libmnl to 1.0.5 (Hybrid Method)
+        run: |
+          echo "::group::Libmnl Upgrade 1.0.5"
+          
+          # 定義路徑
+          LIBMNL_DIR="/opt/rt-n56u/trunk/libs/libmnl"
+          
+          echo "🗑️ 清理舊版 libmnl..."
+          rm -rf "$LIBMNL_DIR"
+          mkdir -p "$LIBMNL_DIR"
+          cd "$LIBMNL_DIR"
+
+          # 1. 寫入 C2 版本的 Patch (禁用 examples，避免編譯錯誤)
+          # 這是從 C2 倉庫提取的關鍵補丁
+          cat << 'EOF' > libmnl-disable_examples.patch
+          --- libmnl-1.0.5-orig/Makefile.am
+          +++ libmnl-1.0.5/Makefile.am
+          @@ -2,8 +2,8 @@
+           
+           ACLOCAL_AMFLAGS = -I m4
+           
+          -SUBDIRS = src include examples doxygen
+          -DIST_SUBDIRS = src include examples doxygen
+          +SUBDIRS = src include
+          +DIST_SUBDIRS = src include
+           
+           pkgconfigdir = $(libdir)/pkgconfig
+           pkgconfig_DATA = libmnl.pc
+          --- libmnl-1.0.5-orig/configure.ac
+          +++ libmnl-1.0.5/configure.ac
+          @@ -27,7 +27,7 @@
+           	-Wformat=2 -pipe"
+           AC_SUBST([regular_CPPFLAGS])
+           AC_SUBST([regular_CFLAGS])
+          -AC_CONFIG_FILES([Makefile src/Makefile include/Makefile include/libmnl/Makefile include/linux/Makefile include/linux/netfilter/Makefile examples/Makefile examples/genl/Makefile examples/kobject/Makefile examples/netfilter/Makefile examples/rtnl/Makefile libmnl.pc doxygen.cfg])
+          +AC_CONFIG_FILES([Makefile src/Makefile include/Makefile include/libmnl/Makefile include/linux/Makefile include/linux/netfilter/Makefile libmnl.pc doxygen.cfg])
+           AC_OUTPUT
+          EOF
+
+          # 2. 寫入 C2 版本的 Makefile (支援並行編譯、自動打補丁)
+          cat << 'EOF' > Makefile
+          SRC_NAME=libmnl-1.0.5
+          SRC_URL=https://www.netfilter.org/pub/libmnl/$(SRC_NAME).tar.bz2
+
+          all: download_test extract_test config_test
+          	$(MAKE) -j$(HOST_NCPU) -C $(SRC_NAME)
+
+          download_test:
+          	( if [ ! -f $(SRC_NAME).tar.bz2 ]; then \
+          		wget -t5 --timeout=20 --no-check-certificate -O $(SRC_NAME).tar.bz2 $(SRC_URL); \
+          	fi )
+
+          extract_test:
+          	( if [ ! -d $(SRC_NAME) ]; then \
+          		tar xjf $(SRC_NAME).tar.bz2; \
+          		patch -d $(SRC_NAME) -p1 -i ../libmnl-disable_examples.patch; \
+          	fi )
+
+          config_test:
+          	( if [ -f ./config_done ]; then \
+          		echo "the same configuration"; \
+          	else \
+          		make configure && touch config_done; \
+          	fi )
+
+          configure:
+          	( cd $(SRC_NAME) ; \
+          	./configure \
+          		--prefix=$(STAGEDIR) \
+          		--enable-static \
+          		--disable-shared \
+          		--host=$(HOST_TARGET) \
+          		--build=$(HOST_BUILD) ; \
+          	)
+
+          clean:
+          	if [ -f $(SRC_NAME)/Makefile ] ; then \
+          		$(MAKE) -C $(SRC_NAME) distclean ; \
+          	fi ; \
+          	rm -f config_done
+
+          install:
+          	$(MAKE) -C $(SRC_NAME) install DESTDIR="" ;
+
+          romfs:
+          EOF
+
+          echo "✅ Libmnl 1.0.5 升級配置完成 (Ready to build)"
+          echo "::endgroup::"
+            
+      # =======================================================
       # [修正版] iptables 升級與修復 (精準匹配 1.8.7)
       # =======================================================
       - name: 🔥 Auto Upgrade iptables 1.8.11 & Patch
@@ -165,81 +258,10 @@ jobs:
           
           # === 設定路徑 (適配此 workflow) ===
           BASE_DIR="/opt/rt-n56u/trunk/user"
-          EBT_ROOT="$BASE_DIR/ebtables"
           ARP_ROOT="$BASE_DIR/arptables"
           
           # ========================================
-          # 1. Ebtables v2.0.11 (Anti-Segfault: O2 + Static)
-          # ========================================
-          echo "⬇️ Upgrading Ebtables to v2.0.11 (Fixing Segfault)..."
-          
-          # 清理並重建目錄
-          rm -rf "$EBT_ROOT"
-          mkdir -p "$EBT_ROOT"
-          cd "$EBT_ROOT" || exit 1
-          
-          # 下載 v2.0.11
-          wget --no-check-certificate "https://www.netfilter.org/pub/ebtables/ebtables-2.0.11.tar.gz" -O src.tar.gz
-          tar -xf src.tar.gz
-          rm -f src.tar.gz
-          mv ebtables-2.0.11 src
-          
-          echo "🔧 Creating Translation Layer (Wrapper Makefile)..."
-          
-          # [修正版 Makefile] 
-          # 1. 改用 -O2 防止 MIPS 指令錯亂
-          # 2. 移除 ?= 讓它無視外部變數，強制生效
-          cat << 'EOF' > Makefile
-          SRC_NAME = src
-          
-          # 繼承 Padavan 編譯器 (cc/gcc)
-          CC ?= gcc
-          
-          # ⚠️ 關鍵修正：強制使用 -O2，絕對不要用 -Os
-          # -static: 確保不依賴外部動態庫 (減少相容性問題)
-          # -Wall: 顯示更多警告以便除錯
-          MY_CFLAGS = -O2 -static -Wall
-          MY_LDFLAGS = -static
-          
-          # 設定 configure
-          # 注意：這裡直接將 CFLAGS 寫死傳入，確保 configure 收到正確參數
-          CONFIGURE_CMD = ./configure \
-                          --host=mipsel-linux \
-                          --prefix=/usr \
-                          --sbindir=/sbin \
-                          --disable-shared \
-                          --enable-static \
-                          CFLAGS="$(MY_CFLAGS)" \
-                          LDFLAGS="$(MY_LDFLAGS)"
-          
-          all:
-          	@echo "👉 [Wrapper] Checking configuration (Force O2)..."
-          	@if [ ! -f $(SRC_NAME)/Makefile ]; then \
-          		echo "👉 [Wrapper] Running configure..."; \
-          		(cd $(SRC_NAME) && $(CONFIGURE_CMD)); \
-          	fi
-          	@echo "👉 [Wrapper] Building static binary..."
-          	$(MAKE) -C $(SRC_NAME) all
-          
-          clean:
-          	@if [ -f $(SRC_NAME)/Makefile ]; then \
-          		$(MAKE) -C $(SRC_NAME) clean; \
-          	fi
-          
-          romfs:
-          	@echo "👉 [Ebtables] Installing to ROMFS..."
-          	# 確保二進位檔存在 (v2.0.11 編譯出來通常叫 ebtables-legacy)
-          	$(ROMFSINST) $(SRC_NAME)/ebtables-legacy /bin/ebtables
-          	
-          	# ⚠️ 絕對不能漏掉這個！
-          	# Ebtables 如果找不到 ethertypes 對照表，某些版本也會直接 Segfault
-          	$(ROMFSINST) $(SRC_NAME)/ethertypes /etc_ro/ethertypes
-          EOF
-          
-          echo "✅ Ebtables v2.0.11 setup complete."
-          
-          # ========================================
-          # 2. Arptables (修復 Tab 匹配問題 + 確保名單有它)
+          # 1. Arptables (修復 Tab 匹配問題 + 確保名單有它)
           # ========================================
           echo "⬇️ Processing Arptables..."
           
@@ -314,7 +336,7 @@ jobs:
           fi
           
           # ========================================
-          # 3. 核心模組支援 (Kernel Config)
+          # 2. 核心模組支援 (Kernel Config)
           # ========================================
           cd "/opt/rt-n56u"
           TARGET_KCONF="trunk/linux-4.4.x/.config"
