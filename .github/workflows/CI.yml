@@ -19,7 +19,7 @@ on:
       nanoversion:
         description: "是否執行極限瘦身"
         type: boolean
-        default: false
+        default: true
       
       customization:
         description: '自定義配置 JSON'
@@ -78,9 +78,9 @@ jobs:
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
 
       # =======================================================
-      # [新增] Libmnl 升級至 1.0.5 (混合 C2 架構 + 官方源碼)
+      # [修正版 v2] Libmnl 升級至 1.0.5 (Sed 取代 Patch，保證成功)
       # =======================================================
-      - name: 🔥 Upgrade libmnl to 1.0.5 (Hybrid Method)
+      - name: 🔥 Upgrade libmnl to 1.0.5 (Robust Sed Method)
         run: |
           echo "::group::Libmnl Upgrade 1.0.5"
           
@@ -92,34 +92,8 @@ jobs:
           mkdir -p "$LIBMNL_DIR"
           cd "$LIBMNL_DIR"
 
-          # 1. 寫入 C2 版本的 Patch (禁用 examples，避免編譯錯誤)
-          # 這是從 C2 倉庫提取的關鍵補丁
-          cat << 'EOF' > libmnl-disable_examples.patch
-          --- libmnl-1.0.5-orig/Makefile.am
-          +++ libmnl-1.0.5/Makefile.am
-          @@ -2,8 +2,8 @@
-           
-           ACLOCAL_AMFLAGS = -I m4
-           
-          -SUBDIRS = src include examples doxygen
-          -DIST_SUBDIRS = src include examples doxygen
-          +SUBDIRS = src include
-          +DIST_SUBDIRS = src include
-           
-           pkgconfigdir = $(libdir)/pkgconfig
-           pkgconfig_DATA = libmnl.pc
-          --- libmnl-1.0.5-orig/configure.ac
-          +++ libmnl-1.0.5/configure.ac
-          @@ -27,7 +27,7 @@
-           	-Wformat=2 -pipe"
-           AC_SUBST([regular_CPPFLAGS])
-           AC_SUBST([regular_CFLAGS])
-          -AC_CONFIG_FILES([Makefile src/Makefile include/Makefile include/libmnl/Makefile include/linux/Makefile include/linux/netfilter/Makefile examples/Makefile examples/genl/Makefile examples/kobject/Makefile examples/netfilter/Makefile examples/rtnl/Makefile libmnl.pc doxygen.cfg])
-          +AC_CONFIG_FILES([Makefile src/Makefile include/Makefile include/libmnl/Makefile include/linux/Makefile include/linux/netfilter/Makefile libmnl.pc doxygen.cfg])
-           AC_OUTPUT
-          EOF
-
-          # 2. 寫入 C2 版本的 Makefile (支援並行編譯、自動打補丁)
+          # 1. 寫入 C2 版本的 Makefile (改用 sed 修改源碼)
+          # 注意：我們移除了 patch 檔案，直接在 extract_test 用 sed 操作
           cat << 'EOF' > Makefile
           SRC_NAME=libmnl-1.0.5
           SRC_URL=https://www.netfilter.org/pub/libmnl/$(SRC_NAME).tar.bz2
@@ -135,7 +109,18 @@ jobs:
           extract_test:
           	( if [ ! -d $(SRC_NAME) ]; then \
           		tar xjf $(SRC_NAME).tar.bz2; \
-          		patch -d $(SRC_NAME) -p1 -i ../libmnl-disable_examples.patch; \
+          		cd $(SRC_NAME); \
+          		echo "🔧 Applying Sed patches to remove examples/doxygen..."; \
+          		\
+          		# [修改 1] Makefile.am: 移除 examples 和 doxygen 目錄 \
+          		sed -i 's/ examples doxygen//g' Makefile.am; \
+          		\
+          		# [修改 2] configure.ac: 移除所有 examples 下的 Makefile 定義 \
+          		# 使用正則表達式精準刪除 \
+          		sed -i 's| examples/[a-zA-Z0-9_/]*||g' configure.ac; \
+          		\
+          		# [重要] 因為修改了 .am 和 .ac 檔，必須重新生成 configure \
+          		autoreconf -vfi; \
           	fi )
 
           config_test:
@@ -339,7 +324,9 @@ jobs:
           # 2. 核心模組支援 (Kernel Config)
           # ========================================
           cd "/opt/rt-n56u"
+          # 自動判斷核心版本路徑
           TARGET_KCONF="trunk/linux-4.4.x/.config"
+          [ ! -f "$TARGET_KCONF" ] && TARGET_KCONF="trunk/linux-3.4.x/.config"
           
           if [ -f "$TARGET_KCONF" ]; then
              MODULES="CONFIG_IP_NF_ARPTABLES CONFIG_IP_NF_ARPFILTER CONFIG_IP_NF_ARP_MANGLE CONFIG_NF_LOG_ARP CONFIG_BRIDGE_EBT_ARP CONFIG_BRIDGE_EBT_ARPREPLY"
