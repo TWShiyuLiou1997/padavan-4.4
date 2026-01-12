@@ -78,6 +78,84 @@ jobs:
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
 
       # =======================================================
+      # [修正版 v2] Libmnl 升級至 1.0.5 (Sed 取代 Patch，保證成功)
+      # =======================================================
+      - name: 🔥 Upgrade libmnl to 1.0.5 (Robust Sed Method)
+        run: |
+          echo "::group::Libmnl Upgrade 1.0.5"
+          
+          # 定義路徑
+          LIBMNL_DIR="/opt/rt-n56u/trunk/libs/libmnl"
+          
+          echo "🗑️ 清理舊版 libmnl..."
+          rm -rf "$LIBMNL_DIR"
+          mkdir -p "$LIBMNL_DIR"
+          cd "$LIBMNL_DIR"
+
+          # 1. 寫入 C2 版本的 Makefile (改用 sed 修改源碼)
+          # 注意：我們移除了 patch 檔案，直接在 extract_test 用 sed 操作
+          cat << 'EOF' > Makefile
+          SRC_NAME=libmnl-1.0.5
+          SRC_URL=https://www.netfilter.org/pub/libmnl/$(SRC_NAME).tar.bz2
+
+          all: download_test extract_test config_test
+          	$(MAKE) -j$(HOST_NCPU) -C $(SRC_NAME)
+
+          download_test:
+          	( if [ ! -f $(SRC_NAME).tar.bz2 ]; then \
+          		wget -t5 --timeout=20 --no-check-certificate -O $(SRC_NAME).tar.bz2 $(SRC_URL); \
+          	fi )
+
+          extract_test:
+          	( if [ ! -d $(SRC_NAME) ]; then \
+          		tar xjf $(SRC_NAME).tar.bz2; \
+          		cd $(SRC_NAME); \
+          		echo "🔧 Applying Sed patches to remove examples/doxygen..."; \
+          		\
+          		# [修改 1] Makefile.am: 移除 examples 和 doxygen 目錄 \
+          		sed -i 's/ examples doxygen//g' Makefile.am; \
+          		\
+          		# [修改 2] configure.ac: 移除所有 examples 下的 Makefile 定義 \
+          		# 使用正則表達式精準刪除 \
+          		sed -i 's| examples/[a-zA-Z0-9_/]*||g' configure.ac; \
+          		\
+          		# [重要] 因為修改了 .am 和 .ac 檔，必須重新生成 configure \
+          		autoreconf -vfi; \
+          	fi )
+
+          config_test:
+          	( if [ -f ./config_done ]; then \
+          		echo "the same configuration"; \
+          	else \
+          		make configure && touch config_done; \
+          	fi )
+
+          configure:
+          	( cd $(SRC_NAME) ; \
+          	./configure \
+          		--prefix=$(STAGEDIR) \
+          		--enable-static \
+          		--disable-shared \
+          		--host=$(HOST_TARGET) \
+          		--build=$(HOST_BUILD) ; \
+          	)
+
+          clean:
+          	if [ -f $(SRC_NAME)/Makefile ] ; then \
+          		$(MAKE) -C $(SRC_NAME) distclean ; \
+          	fi ; \
+          	rm -f config_done
+
+          install:
+          	$(MAKE) -C $(SRC_NAME) install DESTDIR="" ;
+
+          romfs:
+          EOF
+
+          echo "✅ Libmnl 1.0.5 升級配置完成 (Ready to build)"
+          echo "::endgroup::"
+            
+      # =======================================================
       # [修正版] iptables 升級與修復 (精準匹配 1.8.7)
       # =======================================================
       - name: 🔥 Auto Upgrade iptables 1.8.11 & Patch
@@ -106,10 +184,18 @@ jobs:
           # 4. 移除 autogen.sh 調用 (Release 版不需要，且常報錯)
           sed -i '/.\/autogen.sh/d' "$IPT_MAKEFILE"
           
-          # 4. 清理過時指令
+          # 5. 清理過時指令
           sed -i '/extensions\/disabled\//d' "$IPT_MAKEFILE"
 
-          # 5. 生成屏蔽警告的補丁
+          # ==========================================================
+          # 6. [關鍵修改] 讓 iptables 與 libmnl 斷絕關係
+          # 這樣系統裡可以保留 libmnl 給 tc 用，但 iptables 會乖乖當 Legacy 版
+          # ==========================================================
+          sed -i 's/.\/configure/.\/configure --disable-nftables --disable-connlabel --without-libmnl/g' "$IPT_MAKEFILE"
+          echo "✅ 已強制配置: 禁用 NFT, 禁用 libmnl 連結 (NAT 救星)"
+          
+          
+          # 7. 生成屏蔽警告的補丁
           cat << 'EOF' > "$IPT_DIR/999-suppress-warnings.patch"
           --- a/libxtables/xtables.c
           +++ b/libxtables/xtables.c
@@ -139,7 +225,7 @@ jobs:
            	for (ptr = xtables_targets; ptr; ptr = ptr->next) {
           EOF
           
-          # 6. 注入補丁應用邏輯
+          # 8. 注入補丁應用邏輯
           sed -i 's|tar xJf $(SRC_NAME).tar.xz;|tar xJf $(SRC_NAME).tar.xz \&\& patch -d $(SRC_NAME) -p1 < 999-suppress-warnings.patch;|' "$IPT_MAKEFILE"
           
           echo "✅ Iptables 本體修復完成。"
