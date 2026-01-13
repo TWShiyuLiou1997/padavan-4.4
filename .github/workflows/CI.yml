@@ -133,8 +133,8 @@ jobs:
           # 3. 注入下載與解壓邏輯 (因為原本的 Makefile 沒寫下載)
           # 在 all: 目標前插入下載指令
           cd "$IPT_DIR"
-          wget --no-check-certificate "https://www.netfilter.org/projects/iptables/files/${NEW_VER}.tar.xz"
-          tar -xJf "${NEW_VER}.tar.xz"
+          wget --no-check-certificate "https://www.netfilter.org/projects/iptables/files/${NEW_VER}.tar.bz2"
+          tar -xJf "${NEW_VER}.tar.bz2"
           
           # 4. 移除 autogen.sh 調用 (Release 版不需要，且常報錯)
           sed -i '/.\/autogen.sh/d' "$IPT_MAKEFILE"
@@ -173,7 +173,7 @@ jobs:
           EOF
           
           # 7. 注入補丁應用邏輯
-          sed -i 's|tar xJf $(SRC_NAME).tar.xz;|tar xJf $(SRC_NAME).tar.xz \&\& patch -d $(SRC_NAME) -p1 < 999-suppress-warnings.patch;|' "$IPT_MAKEFILE"
+          sed -i 's|tar xJf $(SRC_NAME).tar.bz2;|tar xJf $(SRC_NAME).tar.bz2 \&\& patch -d $(SRC_NAME) -p1 < 999-suppress-warnings.patch;|' "$IPT_MAKEFILE"
           
           echo "✅ Iptables 本體修復完成。"
 
