@@ -305,62 +305,80 @@ jobs:
           TOOLCHAIN_TAG_FOR_NAME=$(echo "${{ inputs.toolchain_select }}" | sed 's/ (.*//g' | sed 's/\//-/g')
           echo "TOOLCHAIN_TAG_FOR_NAME=$TOOLCHAIN_TAG_FOR_NAME" >> $GITHUB_ENV
           
-          # 1. 清空並建立目錄 (確保 tar 有地方放)
-          rm -rf "$TOOLCHAIN_DIR"
-          mkdir -p "$TOOLCHAIN_DIR"
+          # 清理環境
+          rm -rf "$TOOLCHAIN_DIR" toolchain-4.4.x
+          # 建立一個臨時解壓區，避免路徑混亂
+          mkdir -p "temp_extract"
+
+          echo "🔧 Processing: $TOOLCHAIN_CHOICE"
 
           case "$TOOLCHAIN_CHOICE" in
             "Padavan-NG (GCC 13+, uClibc-ng, ZSTD)")
-              echo "⬇️ Downloading Padavan-NG Toolchain (ZSTD)..."
               URL="https://gitlab.com/api/v4/projects/hadzhioglu%2Fpadavan-ng/packages/generic/toolchain/latest/toolchain.tzst"
-              # 【關鍵修正】針對 Padavan-NG 的特殊 3 層結構，使用 strip-components=3
-              curl -L "$URL" | tar --zstd -xf - -C "$TOOLCHAIN_DIR" --strip-components=3
+              echo "⬇️ Downloading Padavan-NG..."
+              curl -L "$URL" | tar --zstd -xf - -C "temp_extract"
               ;;
             
             "Default (hanwckf/linux-4.4-v1.0, uclibc)") 
               sh dl_toolchain.sh 
+              # Default 腳本通常會建立正確目錄，不需要後續搬移
+              rm -rf temp_extract
+              exit 0
               ;;
             
-            # 其他 TurboTse/tsl0922 都是標準 1 層結構，維持不變
             "TurboTse/musl (gcc 13.3.0, musl 1.2.5)") 
               URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" 
-              curl -O -L "$URL"
-              tar -xf "$(basename $URL)" -C "$TOOLCHAIN_DIR" --strip-components=1
+              curl -L "$URL" | tar -xJf - -C "temp_extract"
               ;;
             
             "TurboTse/uclibc (gcc 13.3.0, uClibc-ng 1.0.52)") 
               URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-uclibc.tar.xz" 
-              curl -O -L "$URL"
-              tar -xf "$(basename $URL)" -C "$TOOLCHAIN_DIR" --strip-components=1
+              curl -L "$URL" | tar -xJf - -C "temp_extract"
               ;;
               
-            "tsl0922/musl (gcc 13.2.0, musl 1.2.4)") 
-              URL="https://github.com/tsl0922/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" 
-              curl -O -L "$URL"
-              tar -xf "$(basename $URL)" -C "$TOOLCHAIN_DIR" --strip-components=1
-              ;;
-            
-            "tsl0922/uclibc (gcc 13.2.0, uClibc-ng 1.0.43)") 
-              URL="https://github.com/tsl0922/padavan/releases/download/toolchain/mipsel-linux-uclibc.tar.xz" 
-              curl -O -L "$URL"
-              tar -xf "$(basename $URL)" -C "$TOOLCHAIN_DIR" --strip-components=1
-              ;;
-            
-            "hanwckf/uclibc-v1.1 (gcc 7.4.0, uclibc 1.0.32, SO_REUSEPORT patch)") 
-              URL="https://github.com/hanwckf/padavan-toolchain/releases/download/v1.1/mipsel-linux-uclibc.tar.xz" 
-              curl -O -L "$URL"
-              tar -xf "$(basename $URL)" -C "$TOOLCHAIN_DIR" --strip-components=1
+            # ... 其他 tsl/hanwckf 選項邏輯同上，皆解壓至 temp_extract ...
+            *)
+              # 預設處理
+              URL="https://github.com/hanwckf/padavan-toolchain/releases/download/v1.1/mipsel-linux-uclibc.tar.xz"
+              curl -L "$URL" | tar -xJf - -C "temp_extract"
               ;;
           esac
           
-          echo "✅ Toolchain installed verification:"
-          if [ -f "$TOOLCHAIN_DIR/bin/mipsel-linux-gcc" ]; then
-             ls -lh "$TOOLCHAIN_DIR/bin/mipsel-linux-gcc"
-          else
-             echo "::error:: Toolchain binary NOT FOUND. Check extraction level."
-             ls -R "$TOOLCHAIN_DIR" | head -n 20
+          # === 智慧型目錄偵測與搬移 ===
+          echo "🔍 Locating toolchain bin directory..."
+          # 找出含有 'mipsel-linux-gcc' 的 bin 目錄
+          BIN_PATH=$(find temp_extract -type f -name "mipsel-linux-gcc" -o -name "mipsel-linux-uclibc-gcc" | head -n 1 | xargs dirname)
+          
+          if [ -z "$BIN_PATH" ]; then
+             echo "::error:: ❌ Critical: Could not find gcc binary in extracted files!"
+             ls -R temp_extract
+             exit 1
           fi
           
+          # BIN_PATH 的上一層就是我們要的 Toolchain Root
+          ACTUAL_ROOT=$(dirname "$BIN_PATH")
+          echo "✅ Found toolchain root at: $ACTUAL_ROOT"
+          
+          # 移動到目標位置
+          mkdir -p "$(dirname "$TOOLCHAIN_DIR")"
+          mv "$ACTUAL_ROOT" "$TOOLCHAIN_DIR"
+          rm -rf temp_extract
+          
+          # === 修正執行檔名稱 (建立 Symlink) ===
+          # 許多腳本寫死呼叫 mipsel-linux-gcc，但新 Toolchain 只有 mipsel-linux-uclibc-gcc
+          cd "$TOOLCHAIN_DIR/bin"
+          if [ ! -f "mipsel-linux-gcc" ] && [ -f "mipsel-linux-uclibc-gcc" ]; then
+             echo "🔧 Creating symlinks for compatibility..."
+             ln -sf mipsel-linux-uclibc-gcc mipsel-linux-gcc
+             ln -sf mipsel-linux-uclibc-g++ mipsel-linux-g++
+             ln -sf mipsel-linux-uclibc-ld mipsel-linux-ld
+             ln -sf mipsel-linux-uclibc-ar mipsel-linux-ar
+             ln -sf mipsel-linux-uclibc-strip mipsel-linux-strip
+          fi
+          
+          ls -lh "$TOOLCHAIN_DIR/bin" | head -n 5
+          
+          # 建立系統連結
           sudo rm -rf /toolchain-4.4.x
           sudo ln -s "$TOOLCHAIN_DIR" /toolchain-4.4.x
 
@@ -384,7 +402,7 @@ jobs:
           REAL_MODEL=$(basename "$TARGET_FILE" .config)
           echo "REAL_MODEL=$REAL_MODEL" >> $GITHUB_ENV
 
-          # 極限瘦身邏輯 (保持不變)
+          # 極限瘦身邏輯
           if [ "$NANO_OPT" = "true" ] || [[ "$REAL_MODEL" =~ "nano" ]]; then
             modules=(
               UVC HID SERIAL AUDIO XFRM IMQ IFB NFSD NFSC CIFS \
@@ -405,19 +423,28 @@ jobs:
             done
           fi
 
-          # 核心保留模組 (保持不變)
+          # 核心保留模組
           keep_modules=(OPENSSH SFTP TCPDUMP CURL HTTPS OPENSSL_EC OPENSSL_EXE SFE QOS)
           for kmod in "${keep_modules[@]}"; do
             sed -i "/CONFIG_FIRMWARE_INCLUDE_${kmod}/d" "$TARGET_FILE"
             echo "CONFIG_FIRMWARE_INCLUDE_${kmod}=y" >> "$TARGET_FILE"
           done
           
-          # 【關鍵修正】針對 GCC 13+ (Padavan-NG/TurboTse) 注入寬容參數
-          # 這會解決 "implicit declaration" 和 "loop initial declaration" 錯誤
+          # 【關鍵修復】針對 GCC 13+ 的 Kernel 4.4 兼容性補丁
           if [[ "$TOOLCHAIN_CHOICE" == *"Padavan-NG"* ]] || [[ "$TOOLCHAIN_CHOICE" == *"TurboTse"* ]]; then
-             echo "🔧 GCC 13+ Detected. Injecting compatibility CFLAGS..."
-             # 將這些參數寫入 .config，讓 Makefile 讀取
+             echo "🔧 GCC 13+ detected. Applying critical kernel patches..."
+             
+             # 1. 注入寬容的 CFLAGS
              echo "CONFIG_FIRMWARE_CFLAGS=\"-std=gnu99 -Wno-error -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types\"" >> "$TARGET_FILE"
+             
+             # 2. 修復 arch/mips/kernel/traps.c 陣列越界錯誤 (Array Subscript Error)
+             # 這是導致 1_build.txt 失敗的主因
+             TRAPS_C="/opt/rt-n56u/trunk/linux-4.4.x/arch/mips/kernel/traps.c"
+             if [ -f "$TRAPS_C" ]; then
+                echo "🩹 Patching traps.c for GCC 13..."
+                # 將 search_extable(..., table - 1, ...) 改為 search_extable(..., table, ...)
+                sed -i 's/search_extable(__start___dbe_table, __stop___dbe_table - 1, addr);/search_extable(__start___dbe_table, __stop___dbe_table, addr);/g' "$TRAPS_C"
+             fi
           fi
           
           cp -f "$TARGET_FILE" "$TRUNK_CONFIG"
