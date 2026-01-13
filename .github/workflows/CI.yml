@@ -309,9 +309,13 @@ jobs:
             "Default (hanwckf/linux-4.4-v1.0, uclibc)") sh dl_toolchain.sh ;;
             "Padavan-NG (GCC 13+, uClibc-ng, ZSTD)")
               echo "⬇️ Downloading Padavan-NG Toolchain (ZSTD)..."
+              
+              # 【關鍵修正 1】在解壓前一刻，強制建立目錄！
               mkdir -p "$TOOLCHAIN_DIR"
+              
               URL="https://gitlab.com/api/v4/projects/hadzhioglu%2Fpadavan-ng/packages/generic/toolchain/latest/toolchain.tzst"
-              # 使用 tar --zstd 解壓流
+              
+              # 【關鍵修正 2】確保 URL 變數被使用，且目錄已存在
               curl -L "$URL" | tar --zstd -xf - -C "$TOOLCHAIN_DIR" --strip-components=1
               ;;
             "TurboTse/musl (gcc 13.3.0, musl 1.2.5)") URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" ;;
