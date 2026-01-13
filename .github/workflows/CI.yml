@@ -33,6 +33,7 @@ on:
         type: choice
         options:
           - Default (hanwckf/linux-4.4-v1.0, uclibc)
+          - Padavan-NG (GCC 13+, uClibc-ng, ZSTD)
           - TurboTse/musl (gcc 13.3.0, musl 1.2.5)
           - TurboTse/uclibc (gcc 13.3.0, uClibc-ng 1.0.52)
           - tsl0922/musl (gcc 13.2.0, musl 1.2.4)
@@ -55,7 +56,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            unzip cpio 7zip p7zip-full curl wget git \
+            unzip cpio 7zip p7zip-full curl wget git zstd \
             build-essential fakeroot flex bison gawk gperf \
             autoconf automake libtool-bin libltdl-dev \
             python3-docutils autopoint gettext texinfo help2man \
@@ -77,6 +78,38 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
 
+      # =======================================================
+      # [完全搬運版] 直接從 Repo 下載 libmnl 覆蓋
+      # =======================================================
+      - name: 🔥 Sync libmnl from padavan-ng repo
+        run: |
+          echo "::group::Direct Sync libmnl"
+          
+          # 1. 進入 libs 目錄並移除舊的 libmnl
+          cd /opt/rt-n56u/trunk/libs
+          rm -rf libmnl
+          
+          # 2. 透過臨時目錄 Clone 該 Repo (只抓 master 分支)
+          git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-ng.git /tmp/padavan-ng
+          
+          # 3. 把該 Repo 裡的 libmnl 完整拷貝過來
+          cp -rf /tmp/padavan-ng/trunk/libs/libmnl ./libmnl
+          
+          # 4. 清理臨時檔案
+          rm -rf /tmp/padavan-ng
+          
+          # 5. 檢查確認文件是否存在
+          if [ -f "./libmnl/Makefile" ]; then
+            echo "✅ libmnl 搬運成功！使用 padavan-ng 原始腳本。"
+            ls -al ./libmnl
+          else
+            echo "::error::❌ 搬運失敗！找不到 Makefile"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+      
+      
       # =======================================================
       # [修正版] iptables 升級與修復 (精準匹配 1.8.7)
       # =======================================================
@@ -274,6 +307,12 @@ jobs:
           
           case "$TOOLCHAIN_CHOICE" in
             "Default (hanwckf/linux-4.4-v1.0, uclibc)") sh dl_toolchain.sh ;;
+            "Padavan-NG (GCC 13+, uClibc-ng, ZSTD)")
+              echo "⬇️ Downloading Padavan-NG Toolchain (ZSTD)..."
+              URL="https://gitlab.com/api/v4/projects/hadzhioglu%2Fpadavan-ng/packages/generic/toolchain/latest/toolchain.tzst"
+              # 使用 tar --zstd 解壓流
+              curl -L "$URL" | tar --zstd -xf - -C "$TOOLCHAIN_DIR" --strip-components=1
+              ;;
             "TurboTse/musl (gcc 13.3.0, musl 1.2.5)") URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" ;;
             "TurboTse/uclibc (gcc 13.3.0, uClibc-ng 1.0.52)") URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-uclibc.tar.xz" ;;
             "tsl0922/musl (gcc 13.2.0, musl 1.2.4)") URL="https://github.com/tsl0922/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" ;;
