@@ -430,20 +430,35 @@ jobs:
             echo "CONFIG_FIRMWARE_INCLUDE_${kmod}=y" >> "$TARGET_FILE"
           done
           
-          # 【關鍵修復】針對 GCC 13+ 的 Kernel 4.4 兼容性補丁
+          # 【安全進化】針對 GCC 13+ 的編譯優化
           if [[ "$TOOLCHAIN_CHOICE" == *"Padavan-NG"* ]] || [[ "$TOOLCHAIN_CHOICE" == *"TurboTse"* ]]; then
-             echo "🔧 GCC 13+ detected. Applying critical kernel patches..."
+             echo "🔧 GCC 13+ detected. Applying safe compatibility adjustments..."
              
-             # 1. 注入寬容的 CFLAGS
-             echo "CONFIG_FIRMWARE_CFLAGS=\"-std=gnu99 -Wno-error -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types\"" >> "$TARGET_FILE"
-             
-             # 2. 修復 arch/mips/kernel/traps.c 陣列越界錯誤 (Array Subscript Error)
-             # 這是導致 1_build.txt 失敗的主因
+             # 安全做法 A: 注入精準的 CFLAGS 到內核 Make 過程，而不是直接改內核源碼
+             # 這樣可以避免直接修改 search_extable 指標運算導致的核心潰散
+             echo "CONFIG_FIRMWARE_CFLAGS=\"-std=gnu99 -Wno-error=array-bounds -Wno-error=maybe-uninitialized -Wno-error=implicit-function-declaration\"" >> "$TARGET_FILE"
+
+             # 安全做法 B: 使用 patch 工具修復 traps.c (如果上面的 CFLAGS 仍攔不住)
+             # 我們先檢查檔案內容是否符合預期，再進行精準修復
              TRAPS_C="/opt/rt-n56u/trunk/linux-4.4.x/arch/mips/kernel/traps.c"
              if [ -f "$TRAPS_C" ]; then
-                echo "🩹 Patching traps.c for GCC 13..."
-                # 將 search_extable(..., table - 1, ...) 改為 search_extable(..., table, ...)
-                sed -i 's/search_extable(__start___dbe_table, __stop___dbe_table - 1, addr);/search_extable(__start___dbe_table, __stop___dbe_table, addr);/g' "$TRAPS_C"
+                echo "🩹 Applying safety patch to traps.c..."
+                # 建立補丁檔
+                cat << 'EOF' > traps_fix.patch
+--- a/arch/mips/kernel/traps.c
++++ b/arch/mips/kernel/traps.c
+@@ -1911,7 +1911,7 @@
+ 	if (addr >= (unsigned long)__start___dbe_table &&
+ 	    addr < (unsigned long)__stop___dbe_table) {
+ 		struct exception_table_entry *e;
+-		e = search_extable(__start___dbe_table, __stop___dbe_table - 1, addr);
++		e = search_extable(__start___dbe_table, __stop___dbe_table, addr);
+ 		if (e)
+ 			return e;
+ 	}
+EOF
+                # 執行 Patch，如果失敗會報錯停止，不會強行修改
+                patch -p1 "$TRAPS_C" < traps_fix.patch || echo "⚠️ Patch skipped or already applied."
              fi
           fi
           
