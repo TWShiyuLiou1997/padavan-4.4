@@ -78,37 +78,6 @@ jobs:
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
 
       # =======================================================
-      # [完全搬運版] 直接從 Repo 下載 libmnl 覆蓋
-      # =======================================================
-      - name: 🔥 Sync libmnl from padavan-ng repo
-        run: |
-          echo "::group::Direct Sync libmnl"
-          
-          # 1. 進入 libs 目錄並移除舊的 libmnl
-          cd /opt/rt-n56u/trunk/libs
-          rm -rf libmnl
-          
-          # 2. 透過臨時目錄 Clone 該 Repo (只抓 master 分支)
-          git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-ng.git /tmp/padavan-ng
-          
-          # 3. 把該 Repo 裡的 libmnl 完整拷貝過來
-          cp -rf /tmp/padavan-ng/trunk/libs/libmnl ./libmnl
-          
-          # 4. 清理臨時檔案
-          rm -rf /tmp/padavan-ng
-          
-          # 5. 檢查確認文件是否存在
-          if [ -f "./libmnl/Makefile" ]; then
-            echo "✅ libmnl 搬運成功！使用 padavan-ng 原始腳本。"
-            ls -al ./libmnl
-          else
-            echo "::error::❌ 搬運失敗！找不到 Makefile"
-            exit 1
-          fi
-          
-          echo "::endgroup::"
-            
-      # =======================================================
       # [修正版] iptables 升級與修復 (精準匹配 1.8.7)
       # =======================================================
       - name: 🔥 Auto Upgrade iptables 1.8.11 & Patch
