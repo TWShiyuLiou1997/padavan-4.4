@@ -309,6 +309,7 @@ jobs:
             "Default (hanwckf/linux-4.4-v1.0, uclibc)") sh dl_toolchain.sh ;;
             "Padavan-NG (GCC 13+, uClibc-ng, ZSTD)")
               echo "⬇️ Downloading Padavan-NG Toolchain (ZSTD)..."
+              mkdir -p "$TOOLCHAIN_DIR"
               URL="https://gitlab.com/api/v4/projects/hadzhioglu%2Fpadavan-ng/packages/generic/toolchain/latest/toolchain.tzst"
               # 使用 tar --zstd 解壓流
               curl -L "$URL" | tar --zstd -xf - -C "$TOOLCHAIN_DIR" --strip-components=1
