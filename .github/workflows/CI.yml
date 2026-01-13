@@ -113,10 +113,10 @@ jobs:
       # =======================================================
       # [修正版] iptables 升級與修復 (精準匹配 1.8.7)
       # =======================================================
-      - name: 🔥 Auto Upgrade iptables 1.8.10 & Patch
+      - name: 🔥 Auto Upgrade iptables 1.8.9 & Patch
         run: |
           echo "::group::Iptables Upgrade & Patching"
-          NEW_VER="iptables-1.8.10"
+          NEW_VER="iptables-1.8.9"
           
           # 1. 鎖定 Makefile 路徑並偵測舊版本
           IPT_MAKEFILE=$(find /opt/rt-n56u/trunk/user/iptables -name Makefile | head -n 1)
@@ -513,7 +513,7 @@ jobs:
           # 2. 收集 iptables Debug 檔案
           mkdir -p "$PACK_DIR/debug_iptables"
           IPT_BASE_DIR="$WORK_DIR/trunk/user/iptables"
-          IPT_SRC_DIR="$IPT_BASE_DIR/iptables-1.8.10"
+          IPT_SRC_DIR="$IPT_BASE_DIR/iptables-1.8.9"
           
           if [ -f "$IPT_BASE_DIR/999-suppress-warnings.patch" ]; then
               cp "$IPT_BASE_DIR/999-suppress-warnings.patch" "$PACK_DIR/debug_iptables/"
