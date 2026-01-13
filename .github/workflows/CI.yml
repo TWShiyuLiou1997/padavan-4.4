@@ -305,24 +305,23 @@ jobs:
           TOOLCHAIN_TAG_FOR_NAME=$(echo "${{ inputs.toolchain_select }}" | sed 's/ (.*//g' | sed 's/\//-/g')
           echo "TOOLCHAIN_TAG_FOR_NAME=$TOOLCHAIN_TAG_FOR_NAME" >> $GITHUB_ENV
           
-          # 1. 預設清空目錄，確保環境乾淨
+          # 1. 清空並建立目錄 (確保 tar 有地方放)
           rm -rf "$TOOLCHAIN_DIR"
-          # 2. 強制先建立目錄，防止 tar 找不到路徑報錯
           mkdir -p "$TOOLCHAIN_DIR"
 
           case "$TOOLCHAIN_CHOICE" in
             "Padavan-NG (GCC 13+, uClibc-ng, ZSTD)")
               echo "⬇️ Downloading Padavan-NG Toolchain (ZSTD)..."
               URL="https://gitlab.com/api/v4/projects/hadzhioglu%2Fpadavan-ng/packages/generic/toolchain/latest/toolchain.tzst"
-              # 【關鍵修正】Padavan-NG 多包了 3 層 (toolchain/out/mipsel-linux-uclibc)，所以要 strip-components=3
+              # 【關鍵修正】針對 Padavan-NG 的特殊 3 層結構，使用 strip-components=3
               curl -L "$URL" | tar --zstd -xf - -C "$TOOLCHAIN_DIR" --strip-components=3
               ;;
             
             "Default (hanwckf/linux-4.4-v1.0, uclibc)") 
-              # Default 腳本內建就有處理，這裡不動
               sh dl_toolchain.sh 
               ;;
             
+            # 其他 TurboTse/tsl0922 都是標準 1 層結構，維持不變
             "TurboTse/musl (gcc 13.3.0, musl 1.2.5)") 
               URL="https://github.com/TurBoTse/padavan/releases/download/toolchain/mipsel-linux-musl.tar.xz" 
               curl -O -L "$URL"
@@ -354,8 +353,13 @@ jobs:
               ;;
           esac
           
-          echo "✅ Toolchain installed to: $TOOLCHAIN_DIR"
-          ls -lh "$TOOLCHAIN_DIR/bin" | head -n 5
+          echo "✅ Toolchain installed verification:"
+          if [ -f "$TOOLCHAIN_DIR/bin/mipsel-linux-gcc" ]; then
+             ls -lh "$TOOLCHAIN_DIR/bin/mipsel-linux-gcc"
+          else
+             echo "::error:: Toolchain binary NOT FOUND. Check extraction level."
+             ls -R "$TOOLCHAIN_DIR" | head -n 20
+          fi
           
           sudo rm -rf /toolchain-4.4.x
           sudo ln -s "$TOOLCHAIN_DIR" /toolchain-4.4.x
@@ -364,11 +368,11 @@ jobs:
         env:
           RAW_TNAME: ${{ inputs.target_select }}
           NANO_OPT: ${{ inputs.nanoversion }}
+          TOOLCHAIN_CHOICE: ${{ inputs.toolchain_select }}
         run: |
           TEMPLATE_DIR="/opt/rt-n56u/trunk/configs/templates"
           TRUNK_CONFIG="/opt/rt-n56u/trunk/.config"
           
-          # 解決 - 與 _ 的匹配問題
           PATTERN_A=$(echo "$RAW_TNAME" | sed 's/-/_/g')
           PATTERN_B=$(echo "$RAW_TNAME")
           TARGET_FILE=$(find "$TEMPLATE_DIR" -maxdepth 1 \( -iname "${PATTERN_A}.config" -o -iname "${PATTERN_B}.config" \) | head -n 1)
@@ -380,7 +384,7 @@ jobs:
           REAL_MODEL=$(basename "$TARGET_FILE" .config)
           echo "REAL_MODEL=$REAL_MODEL" >> $GITHUB_ENV
 
-          # 極限瘦身邏輯
+          # 極限瘦身邏輯 (保持不變)
           if [ "$NANO_OPT" = "true" ] || [[ "$REAL_MODEL" =~ "nano" ]]; then
             modules=(
               UVC HID SERIAL AUDIO XFRM IMQ IFB NFSD NFSC CIFS \
@@ -401,12 +405,20 @@ jobs:
             done
           fi
 
-          # 核心保留模組 (確保移除 HTOP/NANO)
+          # 核心保留模組 (保持不變)
           keep_modules=(OPENSSH SFTP TCPDUMP CURL HTTPS OPENSSL_EC OPENSSL_EXE SFE QOS)
           for kmod in "${keep_modules[@]}"; do
             sed -i "/CONFIG_FIRMWARE_INCLUDE_${kmod}/d" "$TARGET_FILE"
             echo "CONFIG_FIRMWARE_INCLUDE_${kmod}=y" >> "$TARGET_FILE"
           done
+          
+          # 【關鍵修正】針對 GCC 13+ (Padavan-NG/TurboTse) 注入寬容參數
+          # 這會解決 "implicit declaration" 和 "loop initial declaration" 錯誤
+          if [[ "$TOOLCHAIN_CHOICE" == *"Padavan-NG"* ]] || [[ "$TOOLCHAIN_CHOICE" == *"TurboTse"* ]]; then
+             echo "🔧 GCC 13+ Detected. Injecting compatibility CFLAGS..."
+             # 將這些參數寫入 .config，讓 Makefile 讀取
+             echo "CONFIG_FIRMWARE_CFLAGS=\"-std=gnu99 -Wno-error -Wno-implicit-function-declaration -Wno-int-conversion -Wno-incompatible-pointer-types\"" >> "$TARGET_FILE"
+          fi
           
           cp -f "$TARGET_FILE" "$TRUNK_CONFIG"
 
