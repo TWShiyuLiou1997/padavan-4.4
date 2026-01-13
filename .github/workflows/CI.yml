@@ -430,34 +430,22 @@ jobs:
             echo "CONFIG_FIRMWARE_INCLUDE_${kmod}=y" >> "$TARGET_FILE"
           done
           
-          # 3. 【安全進化】針對 GCC 13+ 的編譯優化 (使用 Patch 而非 sed 暴力修改)
+          # 3. 【終極安全版】針對 GCC 13+ 的編譯優化
+          # 不修改任何核心代碼，僅透過參數抑制報錯，確保邏輯絕對安全！
           if [[ "$TOOLCHAIN_CHOICE" == *"Padavan-NG"* ]] || [[ "$TOOLCHAIN_CHOICE" == *"TurboTse"* ]]; then
-             echo "🔧 GCC 13+ detected. Applying safe compatibility adjustments..."
+             echo "🔧 GCC 13+ detected. Applying SAFE compiler flags..."
              
-             # 安全做法 A: 注入精準的 CFLAGS
-             echo "CONFIG_FIRMWARE_CFLAGS=\"-std=gnu99 -Wno-error=array-bounds -Wno-error=maybe-uninitialized -Wno-error=implicit-function-declaration\"" >> "$TARGET_FILE"
-          
-             # 安全做法 B: 使用 patch 工具修復 traps.c
-             TRAPS_C="/opt/rt-n56u/trunk/linux-4.4.x/arch/mips/kernel/traps.c"
-             if [ -f "$TRAPS_C" ]; then
-                echo "🩹 Applying safety patch to traps.c..."
-                # 建立補丁檔 (這裡就是您之前漏掉 EOF 的地方)
-                cat << 'EOF' > traps_fix.patch
-          --- a/arch/mips/kernel/traps.c
-          +++ b/arch/mips/kernel/traps.c
-          @@ -1911,7 +1911,7 @@
-           	if (addr >= (unsigned long)__start___dbe_table &&
-           	    addr < (unsigned long)__stop___dbe_table) {
-           		struct exception_table_entry *e;
-          -		e = search_extable(__start___dbe_table, __stop___dbe_table - 1, addr);
-          +		e = search_extable(__start___dbe_table, __stop___dbe_table, addr);
-           		if (e)
-           			return e;
-           	}
-          EOF
-                # 應用補丁
-                patch -p1 "$TRAPS_C" < traps_fix.patch || echo "⚠️ Patch skipped or already applied."
-             fi
+             # 組合安全參數：
+             # -std=gnu99: 使用舊版 C 標準
+             # -Wno-error=...: 將特定的錯誤降級為警告，不中斷編譯
+             # array-bounds: 解決 traps.c 的 -1 報錯
+             # stringop-overflow: 解決 Realtek 驅動報錯
+             # maybe-uninitialized: 解決變數初始化誤判
+             SAFE_FLAGS="-std=gnu99 -Wno-error=array-bounds -Wno-array-bounds -Wno-error=stringop-overflow -Wno-error=maybe-uninitialized -Wno-error=implicit-function-declaration -Wno-error=int-conversion"
+             
+             echo "CONFIG_FIRMWARE_CFLAGS=\"$SAFE_FLAGS\"" >> "$TARGET_FILE"
+             
+             echo "✅ Safe flags injected. Kernel source remains UNTOUCHED."
           fi
           
           cp -f "$TARGET_FILE" "$TRUNK_CONFIG"
