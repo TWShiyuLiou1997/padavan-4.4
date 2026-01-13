@@ -357,7 +357,13 @@ jobs:
         run: |
           cd /opt/rt-n56u/trunk
           sudo ./clear_tree
-          sudo ./build_firmware_modify "${{ env.REAL_MODEL }}" 0
+          # 修改重點：
+          # 1. 2>&1 : 把錯誤訊息 (stderr) 也導向到標準輸出，這樣報錯也會被記錄。
+          # 2. | tee build.log : 像 T 型水管一樣，一邊流向螢幕(給你看)，一邊流向檔案(存檔)。
+          sudo ./build_firmware_modify "${{ env.REAL_MODEL }}" 0 2>&1 | tee build.log
+          
+          # 檢查一下是否真的產生了 (除錯用)
+          ls -lh build.log
           
           FINAL_FILENAME="${{ env.REAL_MODEL }}-${{ env.TOOLCHAIN_TAG_FOR_NAME }}-${{ env.BUILD_TIME }}.trx"
           FOUND_FILE=$(find images -name "*.trx" | head -n 1)
@@ -384,8 +390,14 @@ jobs:
           [ -f "$WORK_DIR/trunk/.config" ] && cp "$WORK_DIR/trunk/.config" "$PACK_DIR/build.config"
           [ -f "$WORK_DIR/trunk/user/shared/defaults.h" ] && cp "$WORK_DIR/trunk/user/shared/defaults.h" "$PACK_DIR/defaults.h.txt"
           [ -f "$WORK_DIR/trunk/linux-4.4.x/.config" ] && cp "$WORK_DIR/trunk/linux-4.4.x/.config" "$PACK_DIR/kernel.config"
-          # 注意：此腳本的 build log 可能由 CI 系統接管，這邊嘗試找常見位置
-          [ -f "$WORK_DIR/trunk/build.log" ] && cp "$WORK_DIR/trunk/build.log" "$PACK_DIR/build.log"
+          # 這裡路徑要對應上面產生的位置
+          # 因為上面是在 trunk 資料夾下產生的 build.log
+          if [ -f "$WORK_DIR/trunk/build.log" ]; then
+              echo "✅ Found build.log, copying..."
+              cp "$WORK_DIR/trunk/build.log" "$PACK_DIR/build.log"
+          else
+              echo "⚠️ Warning: build.log not found in trunk/"
+          fi
 
           # 2. 收集 iptables Debug 檔案
           mkdir -p "$PACK_DIR/debug_iptables"
