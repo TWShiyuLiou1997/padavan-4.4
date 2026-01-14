@@ -212,15 +212,15 @@ jobs:
           
           # [關鍵驗證邏輯]
           # 直接 grep 顯示包含 Warning 的那幾行，並檢查是否有 #if 0
-          # -n 顯示行號, -C 2 顯示上下兩行上下文
+          # -n 顯示行號, -C 3 顯示上下三行上下文
           if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
               echo "✅ Verification Passed: Code is correctly patched!"
               echo "👇 Current Code Snippet in $TARGET_FILE:"
-              grep -nC 2 "Warning: Extension %s is not supported" "$TARGET_FILE"
+              grep -nC 3 "Warning: Extension %s is not supported" "$TARGET_FILE"
           else
               echo "❌ Verification Failed: Code is NOT patched properly!"
               echo "👇 Current Code Snippet (BAD):"
-              grep -nC 2 "Warning: Extension %s is not supported" "$TARGET_FILE"
+              grep -nC 3 "Warning: Extension %s is not supported" "$TARGET_FILE"
               exit 1
           fi
           
