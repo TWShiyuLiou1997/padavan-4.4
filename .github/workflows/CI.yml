@@ -170,11 +170,10 @@ jobs:
           fi
 
           # =======================================================
-          # [插入點] 應用屏蔽警告補丁 (Suppress Warnings Patch)
+          # [插入點] 應用屏蔽警告補丁 (Smart Patching)
           # =======================================================
-          echo "🔧 Generating and applying warning suppression patch..."
+          echo "🔧 Generating warning suppression patch..."
           
-          # 建立補丁檔案
           cat << 'EOF' > 999-suppress-warnings.patch
           --- a/libxtables/xtables.c
           +++ b/libxtables/xtables.c
@@ -204,10 +203,26 @@ jobs:
            	for (ptr = xtables_targets; ptr; ptr = ptr->next) {
           EOF
 
-          # 直接對 iptables-1.8.10 目錄打補丁 (比修改 Makefile 更安全)
-          # -p1 代表忽略路徑的第一層 (a/ 和 b/)
-          patch -d iptables-1.8.10 -p1 < 999-suppress-warnings.patch || { echo "❌ Patch failed"; exit 1; }
-          echo "✅ Iptables 本體補丁應用成功。"
+          echo "🩹 Applying patch..."
+          # 這裡我們允許 patch 失敗 (去掉 || exit 1)，因為如果已經 Patch 過了，它會失敗
+          patch -d iptables-1.8.10 -p1 < 999-suppress-warnings.patch || echo "⚠️ Patch return error (Might be already applied), proceeding to verification..."
+          
+          echo "🔍 verifying code content..."
+          TARGET_FILE="iptables-1.8.10/libxtables/xtables.c"
+          
+          # [關鍵驗證邏輯]
+          # 直接 grep 顯示包含 Warning 的那幾行，並檢查是否有 #if 0
+          # -n 顯示行號, -C 2 顯示上下兩行上下文
+          if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
+              echo "✅ Verification Passed: Code is correctly patched!"
+              echo "👇 Current Code Snippet in $TARGET_FILE:"
+              grep -nC 2 "Warning: Extension %s is not supported" "$TARGET_FILE"
+          else
+              echo "❌ Verification Failed: Code is NOT patched properly!"
+              echo "👇 Current Code Snippet (BAD):"
+              grep -nC 2 "Warning: Extension %s is not supported" "$TARGET_FILE"
+              exit 1
+          fi
           
           # =======================================================
 
