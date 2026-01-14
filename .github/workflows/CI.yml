@@ -135,7 +135,7 @@ jobs:
           # 重試迴圈：最多試 5 次，每次間隔 10 秒
           for i in {1..5}; do
              echo "🔄 Attempt $i/5 to clone..."
-             git clone --depth 1 https://git.netfilter.org/iptables iptables-git && break
+             git clone --depth 1 https://git.netfilter.org/iptables && break
              echo "⚠️ Clone failed, retrying in 10s..."
              sleep 10
           done
