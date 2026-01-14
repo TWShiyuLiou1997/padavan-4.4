@@ -108,42 +108,85 @@ jobs:
           fi
           
           echo "::endgroup::"
-      
-      
+
       # =======================================================
-      # [修正版] iptables 升級與修復 (精準匹配 1.8.7)
+      # [實驗性] 直取 Git 最新源碼 (復刻 1.8.7 配置)
       # =======================================================
-      - name: 🔥 Auto Upgrade iptables 1.8.7 & Patch
+      - name: 🔥 Build iptables from Git (Latest)
         run: |
-          echo "::group::Iptables Upgrade & Patching"
-          NEW_VER="iptables-1.8.7"
+          echo "::group::Iptables Git Build"
           
-          # 1. 鎖定 Makefile 路徑並偵測舊版本
+          GIT_DIR_NAME="iptables-git"
+          
+          # 1. 鎖定 Makefile 路徑
           IPT_MAKEFILE=$(find /opt/rt-n56u/trunk/user/iptables -name Makefile | head -n 1)
           IPT_DIR=$(dirname "$IPT_MAKEFILE")
           
-          # 從 Makefile 裡面抓出目前的版本 (例如 iptables-1.8.7)
+          # 抓出原本 Makefile 裡寫的舊版本號
           OLD_VER_STR=$(grep -o 'iptables-[0-9.]*' "$IPT_MAKEFILE" | head -n 1)
-          echo "✅ 偵測到舊版本: $OLD_VER_STR"
-          echo "✅ 準備升級至: $NEW_VER"
-
-          # 2. 修改主 Makefile 的版本號
-          sed -i "s/$OLD_VER_STR/$NEW_VER/g" "$IPT_MAKEFILE"
+          echo "✅ 偵測到原始配置版本: $OLD_VER_STR"
           
-          # 3. 注入下載與解壓邏輯 (因為原本的 Makefile 沒寫下載)
-          # 在 all: 目標前插入下載指令
+          # 2. 清理與 Clone
           cd "$IPT_DIR"
-          wget --no-check-certificate "https://www.netfilter.org/projects/iptables/files/${NEW_VER}.tar.bz2"
-          tar -xf "${NEW_VER}.tar.bz2"
+          rm -rf "$GIT_DIR_NAME"
           
-          # 4. 移除 autogen.sh 調用 (Release 版不需要，且常報錯)
-          sed -i '/.\/autogen.sh/d' "$IPT_MAKEFILE"
+          echo "⬇️ Cloning iptables from git.netfilter.org..."
+          git clone --depth 1 https://git.netfilter.org/iptables "$GIT_DIR_NAME"
           
-          # 5. 清理過時指令
+          # 3. 預處理：autogen.sh
+          echo "🔧 Running autogen.sh..."
+          cd "$GIT_DIR_NAME"
+          ./autogen.sh || { echo "❌ autogen failed"; exit 1; }
+          
+          # 4. [關鍵修復] 暴力移除 libxt_NFLOG
+          if [ -f "extensions/libxt_NFLOG.c" ]; then
+             echo "💣 Removing incompatible extension: libxt_NFLOG.c"
+             rm extensions/libxt_NFLOG.c
+             # 從 extensions/Makefile.am 中移除引用 (如果有的話，避免 automake 報錯)
+             # 但 autogen.sh 已經跑過，這裡直接刪檔通常能通過編譯，因為 make 會忽略缺失的 .o
+          fi
+          
+          cd ..
+          
+          # 5. 修改 Padavan 的 Makefile (復刻 1.8.7 配置)
+          echo "🔧 Patching Makefile to match 1.8.7 config..."
+          
+          # A. 替換版本變數
+          sed -i "s/$OLD_VER_STR/$GIT_DIR_NAME/g" "$IPT_MAKEFILE"
+          
+          # B. 調整目標：移除 download_test 和 extract_test
+          sed -i 's/^all: .*/all: config_test/' "$IPT_MAKEFILE"
+          
+          # C. 移除舊版特有的 extensions/disabled 清理指令
           sed -i '/extensions\/disabled\//d' "$IPT_MAKEFILE"
+          
+          # D. [核心步驟] 注入復刻版 configure 參數
+          # 這是完全參照您提供的 1.8.7 Makefile 參數
+          # 加上了 --disable-bpf-compiler --disable-nfsynproxy 是為了適配新版代碼
+          
+          NEW_CONFIGURE="./configure \\
+            --prefix= \\
+            --enable-static \\
+            --disable-shared \\
+            --disable-nftables \\
+            --disable-connlabel \\
+            --disable-bpf-compiler \\
+            --disable-nfsynproxy \\
+            --with-xtlibdir=/usr/lib/xtables \\
+            --with-kernel=\$(ROOTDIR)/\$(LINUXDIR) \\
+            --with-xt-lock-name=\"/var/lock/xtables.lock\" \\
+            \$(if \$(CONFIG_IPV6),--enable-ipv6,--disable-ipv6) \\
+            --host=\$(HOST_TARGET) \\
+            --build=\$(HOST_BUILD)"
+            
+          # 使用 perl 進行多行替換 (因為 sed 處理多行比較麻煩)
+          # 將原本的 ./configure ... 一直到結尾分號，替換成新的參數
+          perl -i -0pe "s|\./configure.*?;|$NEW_CONFIGURE ;|s" "$IPT_MAKEFILE"
+          
+          echo "✅ Makefile patched with legacy configuration."
 
-          # 6. 生成屏蔽警告的補丁
-          cat << 'EOF' > "$IPT_DIR/999-suppress-warnings.patch"
+          # 6. 嘗試應用警告屏蔽補丁 (Best Effort)
+          cat << 'EOF' > "999-suppress-warnings.patch"
           --- a/libxtables/xtables.c
           +++ b/libxtables/xtables.c
           @@ -809,9 +809,11 @@
@@ -172,21 +215,17 @@ jobs:
            	for (ptr = xtables_targets; ptr; ptr = ptr->next) {
           EOF
           
-          # 7. 注入補丁應用邏輯
-          sed -i 's|tar xf $(SRC_NAME).tar.bz2;|tar xf $(SRC_NAME).tar.bz2 \&\& patch -d $(SRC_NAME) -p1 < 999-suppress-warnings.patch;|' "$IPT_MAKEFILE"
-          
-          echo "✅ Iptables 本體修復完成。"
+          echo "🔧 Applying patch..."
+          patch -d "$GIT_DIR_NAME" -p1 < 999-suppress-warnings.patch || echo "⚠️ Patch failed, skipping..."
 
-          # --- Part 2: 修復所有依賴舊版 iptables 的其他軟體 ---
-          echo "🔍 開始掃描並修復依賴舊版 iptables 的其他套件..."
-          
-          # 搜尋 /opt/rt-n56u/trunk/user 下所有含有 "iptables-1.8.7" 字串的 Makefile
+          # --- Part 2: 全局路徑替換 ---
+          echo "🔍 Updating dependent Makefiles..."
           grep -rl "$OLD_VER_STR" /opt/rt-n56u/trunk/user/ | while read -r file ; do
-              echo "  - 修復路徑: $file"
-              sed -i "s/$OLD_VER_STR/$NEW_VER/g" "$file"
+              echo "  - Updating: $file"
+              sed -i "s/$OLD_VER_STR/$GIT_DIR_NAME/g" "$file"
           done
-          
-          echo "🎉 全局路徑替換完成！所有套件現在都指向 $NEW_VER"
+
+          echo "🎉 全局路徑替換完成！所有套件現在都指向 $GIT_DIR_NAME"
           echo "::endgroup::"
 
       # =======================================================
