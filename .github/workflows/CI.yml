@@ -110,76 +110,72 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [最終版] 1.8.7 殼 + 1.8.11 核 + 網路重試機制 (Fixed)
+      # [完全搬運版] iptables 1.8.10 (Sync from padavan-ng)
       # =======================================================
-      - name: 🔥 Build iptables from Git (Robust Hybrid)
+      - name: 🔥 Sync iptables from padavan-ng
         run: |
-          echo "::group::Iptables Hybrid Build"
+          echo "::group::Sync Iptables 1.8.10"
           
-          # 1. 鎖定 Makefile 路徑
-          IPT_MAKEFILE=$(find /opt/rt-n56u/trunk/user/iptables -name Makefile | head -n 1)
-          IPT_DIR=$(dirname "$IPT_MAKEFILE")
+          # 定義目標路徑
+          IPT_ROOT="/opt/rt-n56u/trunk/user/iptables"
           
-          # 抓出 Makefile 內寫死的舊版本號
-          ORIG_VER_NAME=$(grep -o "iptables-[0-9]\+\.[0-9]\+\.[0-9]\+" "$IPT_MAKEFILE" | head -n1)
+          # 1. 清理舊目錄 (原本是 1.8.7)
+          echo "🗑️ Removing old iptables directory..."
+          rm -rf "$IPT_ROOT"
           
-          echo "✅ 目標 Makefile: $IPT_MAKEFILE"
-          echo "✅ 偽裝目錄名稱: $ORIG_VER_NAME"
+          # 2. 透過臨時目錄 Clone padavan-ng
+          # 這裡我們利用 Github 的 repo 來獲取最新的 Makefile 配置
+          git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-ng.git /tmp/padavan-ng
           
-          cd "$IPT_DIR"
-          
-          # =======================================================
-          # 2. 下載 Git 源碼 (保留你的重試邏輯)
-          # =======================================================
-          echo "⬇️ Starting Robust Clone..."
-          rm -rf iptables-git
-          
-          git config --global http.postBuffer 524288000
-          git config --global http.sslVerify false
-          
-          MAX_RETRIES=5
-          CLONE_SUCCESS=false
-          
-          for ((i=1; i<=MAX_RETRIES; i++)); do
-              echo "🔄 [Attempt $i/$MAX_RETRIES] Trying to clone..."
-              if git clone --depth 1 https://git.netfilter.org/iptables iptables-git; then
-                  echo "✅ HTTPS Clone Successful!"
-                  CLONE_SUCCESS=true
-                  break
-              fi
-              echo "⚠️ HTTPS failed. Switching protocol..."
-              rm -rf iptables-git
-              if git clone --depth 1 git://git.netfilter.org/iptables iptables-git; then
-                  echo "✅ GIT Protocol Clone Successful!"
-                  CLONE_SUCCESS=true
-                  break
-              fi
-              sleep 10
-          done
-          
-          if [ "$CLONE_SUCCESS" = false ] || [ ! -d "iptables-git" ]; then
-              echo "❌ Critical Error: All clone attempts failed."
+          # 3. 搬運 iptables 目錄
+          echo "🚚 Syncing iptables folder..."
+          if [ -d "/tmp/padavan-ng/trunk/user/iptables" ]; then
+              cp -rf /tmp/padavan-ng/trunk/user/iptables "$IPT_ROOT"
+              echo "✅ 成功從 padavan-ng 同步 iptables 目錄"
+          else
+              echo "❌ Error: 來源 Repo 中找不到 iptables 目錄"
               exit 1
           fi
           
-          # 3. 偷天換日
-          rm -rf "$ORIG_VER_NAME"
-          mv iptables-git "$ORIG_VER_NAME"
+          # 4. 清理臨時檔案
+          rm -rf /tmp/padavan-ng
           
-          # 4. 源碼預處理 (進入源碼目錄)
-          cd "$ORIG_VER_NAME"
+          # 5. 進入目錄準備編譯環境
+          cd "$IPT_ROOT"
           
-          echo "🔧 Running autogen.sh..."
-          ./autogen.sh || { echo "❌ autogen failed"; exit 1; }
-          
-          # [修復 1] 移除 NFLOG
-          if [ -f "extensions/libxt_NFLOG.c" ]; then
-             echo "💣 Removing incompatible extension: libxt_NFLOG.c"
-             rm extensions/libxt_NFLOG.c
+          # 驗證 Makefile 是否正確 (確認是否為 1.8.10)
+          if grep -q "SRC_NAME=iptables-1.8.10" Makefile; then
+              echo "✅ 版本確認: 1.8.10 (Makefile 驗證通過)"
+              
+              # [關鍵步驟] 執行 Makefile 內的下載與解壓規則
+              # 依據你提供的 Makefile，'all' 目標沒有包含 download/extract
+              # 所以我們必須手動執行這兩個 target，否則後續編譯會找不到原始碼
+              
+              echo "⬇️ Running make download_test..."
+              make download_test || { echo "❌ Download failed"; exit 1; }
+              
+              echo "📦 Running make extract_test..."
+              make extract_test || { echo "❌ Extract failed"; exit 1; }
+              
+              # 再次確認解壓結果
+              if [ -d "iptables-1.8.10" ]; then
+                  echo "✅ 源碼已就緒 (iptables-1.8.10)"
+              else
+                  echo "❌ 源碼解壓失敗，請檢查網路或 Makefile 設定"
+                  exit 1
+              fi
+          else
+              echo "⚠️ 警告：同步過來的 Makefile 版本似乎不是 1.8.10，請檢查！"
+              cat Makefile | grep SRC_NAME
           fi
+
+          # =======================================================
+          # [插入點] 應用屏蔽警告補丁 (Suppress Warnings Patch)
+          # =======================================================
+          echo "🔧 Generating and applying warning suppression patch..."
           
-          # [修復 2] 應用警告屏蔽補丁
-          cat << 'EOF' > "999-suppress-warnings.patch"
+          # 建立補丁檔案
+          cat << 'EOF' > 999-suppress-warnings.patch
           --- a/libxtables/xtables.c
           +++ b/libxtables/xtables.c
           @@ -809,9 +809,11 @@
@@ -207,53 +203,23 @@ jobs:
            
            	for (ptr = xtables_targets; ptr; ptr = ptr->next) {
           EOF
+
+          # 直接對 iptables-1.8.10 目錄打補丁 (比修改 Makefile 更安全)
+          # -p1 代表忽略路徑的第一層 (a/ 和 b/)
+          patch -d iptables-1.8.10 -p1 < 999-suppress-warnings.patch || { echo "❌ Patch failed"; exit 1; }
+          echo "✅ Iptables 本體補丁應用成功。"
           
-          echo "🔧 Applying patch..."
-          # FIX: 已經在目錄內，不需要 -d "$ORIG_VER_NAME"
-          patch -p1 < 999-suppress-warnings.patch || echo "⚠️ Patch failed, skipping..."
+          # =======================================================
+
+          # 6. 全局依賴修復 (Part 2)
+          # 因為我們把版本從 1.8.7 換成了 1.8.10，必須修復其他套件的引用路徑
+          echo "🔍 修復依賴舊版 (1.8.7) 的其他組件..."
+          grep -rl "iptables-1.8.7" /opt/rt-n56u/trunk/user/ | while read -r file ; do
+              echo "  - Patching dependency in: $file"
+              sed -i "s/iptables-1.8.7/iptables-1.8.10/g" "$file"
+          done
           
-          cd ..
-          
-          # 5. 手術修改 Makefile (清理後的版本)
-          echo "🔧 Rewriting Makefile configuration block..."
-          
-          # 新的編譯參數 (注意 escape 變數)
-          NEW_OPTS="--prefix= --enable-static --disable-shared --disable-nftables --disable-connlabel --disable-bpf-compiler --disable-nfsynproxy --with-xtlibdir=/usr/lib/xtables --with-kernel=\$(ROOTDIR)/\$(LINUXDIR) --with-xt-lock-name=/var/lock/xtables.lock \$(if \$(CONFIG_IPV6),--enable-ipv6,--disable-ipv6) --host=\$(HOST_TARGET) --build=\$(HOST_BUILD)"
-          
-          # 準備插入的內容塊
-          {
-            printf "configure:\n"
-            printf "\t( cd \$(SRC_NAME) ; \\\\\n"
-            printf "\t./autogen.sh ; \\\\\n"
-            printf "\t./configure \\\\\n"
-            printf "\t\t%s ; \\\\\n" "$NEW_OPTS"
-            printf "\t)\n"
-          } > new_configure_block.txt
-          
-          # 步驟 A: 刪除舊的 configure 區塊 (這步是正確的，保留)
-          sed -i '/^configure:/,/^\s*)/d' "$IPT_MAKEFILE"
-          
-          # 步驟 B: 插入新區塊 (FIX: 只使用 Perl 這一種方法，並刪除其他 sed 嘗試)
-          # 邏輯：找到 "clean:" 開頭的行，在它上方插入 new_configure_block.txt 的內容
-          if grep -q "^clean:" "$IPT_MAKEFILE"; then
-              perl -i -pe 'print `cat new_configure_block.txt` if /^clean:/' "$IPT_MAKEFILE"
-              echo "✅ Makefile patched successfully."
-          else
-              echo "❌ Error: Could not find 'clean:' target in Makefile to use as anchor."
-              exit 1
-          fi
-          
-          # 檢查語法 (Tab check)
-          if grep -P "^\t" "$IPT_MAKEFILE" > /dev/null; then
-              echo "✅ Tab indentation detected."
-          else
-              echo "⚠️ Warning: No tabs detected? Make might fail."
-          fi
-          
-          # 預覽結果
-          echo "🔍 Previewing patched Makefile:"
-          grep -A 8 "^configure:" "$IPT_MAKEFILE"
-          
+          echo "🎉 Iptables 同步與環境修復完成！"
           echo "::endgroup::"
 
       # =======================================================
