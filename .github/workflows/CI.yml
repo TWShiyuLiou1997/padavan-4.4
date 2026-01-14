@@ -128,22 +128,50 @@ jobs:
           
           cd "$IPT_DIR"
           
-          # 2. 下載 Git 源碼 (加入重試機制，解決 netfilter.org 不穩問題)
-          echo "⬇️ Cloning iptables from git.netfilter.org..."
+          # =======================================================
+          # 2. 下載 Git 源碼 (增強版：雙協議切換 + 參數優化)
+          # =======================================================
+          echo "⬇️ Starting Robust Clone..."
           rm -rf iptables-git
           
-          # 重試迴圈：最多試 5 次，每次間隔 10 秒
-          for i in {1..5}; do
-             echo "🔄 Attempt $i/5 to clone..."
-             git clone --depth 1 https://git.netfilter.org/iptables && break
-             echo "⚠️ Clone failed, retrying in 10s..."
-             sleep 10
+          # 優化 Git 網路設置 (防止大文件/慢速導致中斷)
+          git config --global http.postBuffer 524288000
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
+          git config --global http.sslVerify false
+          
+          # 定義重試迴圈
+          MAX_RETRIES=5
+          CLONE_SUCCESS=false
+          
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+              echo "🔄 [Attempt $i/$MAX_RETRIES] Trying to clone..."
+              
+              # 策略 A: 優先嘗試 HTTPS
+              if git clone --depth 1 https://git.netfilter.org/iptables iptables-git; then
+                  echo "✅ HTTPS Clone Successful!"
+                  CLONE_SUCCESS=true
+                  break
+              fi
+              
+              echo "⚠️ HTTPS failed. Cleaning up and switching protocol..."
+              rm -rf iptables-git
+              
+              # 策略 B: 嘗試 GIT 協議 (通常能繞過 HTTPS 阻擋)
+              if git clone --depth 1 git://git.netfilter.org/iptables iptables-git; then
+                  echo "✅ GIT Protocol Clone Successful!"
+                  CLONE_SUCCESS=true
+                  break
+              fi
+              
+              echo "⚠️ GIT protocol failed too. Waiting 15s before retry..."
+              sleep 15
           done
           
-          # 檢查是否真的下載成功
-          if [ ! -d "iptables-git" ]; then
-             echo "❌ Critical Error: Git clone failed after 5 attempts."
-             exit 1
+          # 最終檢查
+          if [ "$CLONE_SUCCESS" = false ] || [ ! -d "iptables-git" ]; then
+              echo "❌ Critical Error: All clone attempts failed. Network blocked?"
+              exit 1
           fi
           
           # 3. 偷天換日：刪除舊版源碼，放入新版源碼
