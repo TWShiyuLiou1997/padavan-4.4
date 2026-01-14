@@ -110,81 +110,47 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [實驗性] 直取 Git 最新源碼 (復刻 1.8.7 配置)
+      # [1.8.7 結構專用] 升級 Git 最新版 (1.8.11+) 修復腳本
       # =======================================================
-      - name: 🔥 Build iptables from Git (Latest)
+      - name: 🔥 Upgrade iptables to Git Version (Hybrid Mode)
         run: |
-          echo "::group::Iptables Git Build"
-          
-          GIT_DIR_NAME="iptables-git"
+          echo "::group::Iptables Hybrid Build"
           
           # 1. 鎖定 Makefile 路徑
           IPT_MAKEFILE=$(find /opt/rt-n56u/trunk/user/iptables -name Makefile | head -n 1)
           IPT_DIR=$(dirname "$IPT_MAKEFILE")
           
-          # 抓出原本 Makefile 裡寫的舊版本號
-          OLD_VER_STR=$(grep -o 'iptables-[0-9.]*' "$IPT_MAKEFILE" | head -n 1)
-          echo "✅ 偵測到原始配置版本: $OLD_VER_STR"
+          # 讀取 Makefile 內寫死的舊版本號 (通常是 iptables-1.8.7)
+          # 我們不動這個變數，讓 Makefile 以為還在編譯舊版
+          ORIG_VER_NAME=$(grep -o "iptables-[0-9]\+\.[0-9]\+\.[0-9]\+" "$IPT_MAKEFILE" | head -n1)
           
-          # 2. 清理與 Clone
+          echo "✅ 目標 Makefile: $IPT_MAKEFILE"
+          echo "✅ 偽裝目錄名稱: $ORIG_VER_NAME"
+          
           cd "$IPT_DIR"
-          rm -rf "$GIT_DIR_NAME"
           
+          # 2. 下載 Git 最新源碼 (目前是 1.8.11)
           echo "⬇️ Cloning iptables from git.netfilter.org..."
-          git clone --depth 1 https://git.netfilter.org/iptables "$GIT_DIR_NAME"
+          rm -rf iptables-git
+          git clone --depth 1 https://git.netfilter.org/iptables iptables-git
           
-          # 3. 預處理：autogen.sh
+          # 3. 偷天換日：刪除舊版源碼，放入新版源碼
+          rm -rf "$ORIG_VER_NAME"
+          mv iptables-git "$ORIG_VER_NAME"
+          
+          # 4. 源碼預處理 (進入源碼目錄)
+          cd "$ORIG_VER_NAME"
+          
           echo "🔧 Running autogen.sh..."
-          cd "$GIT_DIR_NAME"
           ./autogen.sh || { echo "❌ autogen failed"; exit 1; }
           
-          # 4. [關鍵修復] 暴力移除 libxt_NFLOG
+          # [修復 1] 移除舊內核不兼容的 NFLOG
           if [ -f "extensions/libxt_NFLOG.c" ]; then
              echo "💣 Removing incompatible extension: libxt_NFLOG.c"
              rm extensions/libxt_NFLOG.c
-             # 從 extensions/Makefile.am 中移除引用 (如果有的話，避免 automake 報錯)
-             # 但 autogen.sh 已經跑過，這裡直接刪檔通常能通過編譯，因為 make 會忽略缺失的 .o
           fi
           
-          cd ..
-          
-          # 5. 修改 Padavan 的 Makefile (復刻 1.8.7 配置)
-          echo "🔧 Patching Makefile to match 1.8.7 config..."
-          
-          # A. 替換版本變數
-          sed -i "s/$OLD_VER_STR/$GIT_DIR_NAME/g" "$IPT_MAKEFILE"
-          
-          # B. 調整目標：移除 download_test 和 extract_test
-          sed -i 's/^all: .*/all: config_test/' "$IPT_MAKEFILE"
-          
-          # C. 移除舊版特有的 extensions/disabled 清理指令
-          sed -i '/extensions\/disabled\//d' "$IPT_MAKEFILE"
-          
-          # D. [核心步驟] 注入復刻版 configure 參數
-          # 這是完全參照您提供的 1.8.7 Makefile 參數
-          # 加上了 --disable-bpf-compiler --disable-nfsynproxy 是為了適配新版代碼
-          
-          NEW_CONFIGURE="./configure \\
-            --prefix= \\
-            --enable-static \\
-            --disable-shared \\
-            --disable-nftables \\
-            --disable-connlabel \\
-            --disable-bpf-compiler \\
-            --disable-nfsynproxy \\
-            --with-xtlibdir=/usr/lib/xtables \\
-            --with-kernel=\$(ROOTDIR)/\$(LINUXDIR) \\
-            --with-xt-lock-name=\"/var/lock/xtables.lock\" \\
-            \$(if \$(CONFIG_IPV6),--enable-ipv6,--disable-ipv6) \\
-            --host=\$(HOST_TARGET) \\
-            --build=\$(HOST_BUILD)"
-            
-          # 使用 perl 進行多行替換 (因為 sed 處理多行比較麻煩)
-          # 將原本的 ./configure ... 一直到結尾分號，替換成新的參數
-          perl -i -0pe "s|\./configure.*?;|$NEW_CONFIGURE ;|s" "$IPT_MAKEFILE"
-          
-          echo "✅ Makefile patched with legacy configuration."
-
+          # [修復 2] 應用警告屏蔽補丁 (防止 dmesg/log 爆炸)
           # 6. 嘗試應用警告屏蔽補丁 (Best Effort)
           cat << 'EOF' > "999-suppress-warnings.patch"
           --- a/libxtables/xtables.c
@@ -216,16 +182,81 @@ jobs:
           EOF
           
           echo "🔧 Applying patch..."
-          patch -d "$GIT_DIR_NAME" -p1 < 999-suppress-warnings.patch || echo "⚠️ Patch failed, skipping..."
-
-          # --- Part 2: 全局路徑替換 ---
-          echo "🔍 Updating dependent Makefiles..."
-          grep -rl "$OLD_VER_STR" /opt/rt-n56u/trunk/user/ | while read -r file ; do
-              echo "  - Updating: $file"
-              sed -i "s/$OLD_VER_STR/$GIT_DIR_NAME/g" "$file"
-          done
-
-          echo "🎉 全局路徑替換完成！所有套件現在都指向 $GIT_DIR_NAME"
+          patch -d "$ORIG_VER_NAME" -p1 < 999-suppress-warnings.patch || echo "⚠️ Patch failed, skipping..."
+          
+          cd ..
+          
+          # 5. 手術修改 Makefile (關鍵步驟！)
+          # 我們要完全替換掉 1.8.7 Makefile 中的 `configure:` 區塊
+          # 因為舊的參數缺少了 disable-bpf, disable-nfsynproxy 等 1.8.11 必要的開關
+          
+          echo "🔧 Rewriting Makefile configuration block..."
+          
+          # 定義適配 1.8.11 的新參數 (包含禁用 bpf, nftables 等現代功能)
+          # 注意：這裡的 SRC_NAME 變數還是指向我們偷天換日後的資料夾
+          NEW_OPTS="--prefix= --enable-static --disable-shared --disable-nftables --disable-connlabel --disable-bpf-compiler --disable-nfsynproxy --with-xtlibdir=/usr/lib/xtables --with-kernel=\$(ROOTDIR)/\$(LINUXDIR) --with-xt-lock-name=/var/lock/xtables.lock \$(if \$(CONFIG_IPV6),--enable-ipv6,--disable-ipv6) --host=\$(HOST_TARGET) --build=\$(HOST_BUILD)"
+          
+          # 步驟 A: 刪除舊的 configure 區塊
+          # 邏輯：從 "configure:" 這一行開始，刪除到下一個空行或下一個目標前的內容
+          # 1.8.7 的 makefile 結構比較簡單，我們直接用 sed 範圍刪除
+          # 刪除從 "configure:" 開始，到包含 ");" 的那一行 (subshell 結束)
+          sed -i '/^configure:/,/^\s*)/d' "$IPT_MAKEFILE"
+          
+          # 步驟 B: 重建 configure 區塊
+          # 使用 printf "\t" 強制寫入 Tab 鍵，確保不會出現 missing separator 錯誤
+          
+          {
+            printf "configure:\n"
+            printf "\t( cd \$(SRC_NAME) ; \\\\\n"
+            printf "\t./autogen.sh ; \\\\\n"
+            printf "\t./configure \\\\\n"
+            printf "\t\t%s ; \\\\\n" "$NEW_OPTS"
+            printf "\t)\n"
+          } > new_configure_block.txt
+          
+          # 步驟 C: 將新區塊插入到 Makefile (插入在 romfs: 目標之前，或者 clean: 之後)
+          # 為了保險，我們直接追加到 config_test: 的後面，或者重新插入到原本位置
+          # 這裡選擇插入到 clean: 之前
+          sed -i '/^clean:/e cat new_configure_block.txt' "$IPT_MAKEFILE"
+          
+          # 修正 sed 可能造成的插入順序問題 (如果 sed e 擴展不支援，改用 standard r)
+          # 上面的 sed e 是 GNU sed 特有。更通用的方法是找定位點：
+          # 我們找 "clean:" 這一行，在它 *前面* 插入新區塊
+          if grep -q "clean:" "$IPT_MAKEFILE"; then
+             # 先刪掉剛剛可能插入失敗的殘留，重新用標準方法
+             : 
+          else
+             echo "❌ Could not find 'clean:' target in Makefile"
+             exit 1
+          fi
+          
+          # 使用最穩定的 sed 'r' 方法
+          # 1. 先把 configure 區塊清乾淨 (上面步驟A已經做了)
+          # 2. 找到 config_test: 區塊的結尾 (fi ) )，在它後面加入新的 configure
+          # 或者更簡單：直接追加到文件末尾，但 Make 習慣把 all 放前面。
+          # 我們選擇：找到 "clean:"，在它上方插入
+          sed -i '/^clean:/i \
+          ' "$IPT_MAKEFILE"
+          # 這裡比較難處理多行插入，改用臨時文件拼接法
+          
+          # === 最終極拼接法 (保證格式完美) ===
+          # 1. 讀取 Makefile 扣除掉 configure 區塊的部分 (已做)
+          # 2. 將 new_configure_block.txt 內容讀入變數
+          
+          # 讓我們用 perl 來做精確插入，比 sed 更穩
+          perl -i -pe 'print `cat new_configure_block.txt` if /^clean:/' "$IPT_MAKEFILE"
+          
+          echo "✅ Makefile patched successfully. Checking syntax..."
+          # 檢查是否有 Tab
+          if grep -P "^\t" "$IPT_MAKEFILE" > /dev/null; then
+             echo "✅ Tab indentation detected."
+          else
+             echo "⚠️ Warning: No tabs detected? Check Makefile."
+          fi
+          
+          # 預覽修改後的 configure 區塊
+          grep -A 8 "^configure:" "$IPT_MAKEFILE"
+          
           echo "::endgroup::"
 
       # =======================================================
