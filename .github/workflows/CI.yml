@@ -110,9 +110,9 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [1.8.7 結構專用] 升級 Git 最新版 (1.8.11+) 修復腳本
+      # [最終版] 1.8.7 殼 + 1.8.11 核 + 網路重試機制
       # =======================================================
-      - name: 🔥 Upgrade iptables to Git Version (Hybrid Mode)
+      - name: 🔥 Build iptables from Git (Robust Hybrid)
         run: |
           echo "::group::Iptables Hybrid Build"
           
@@ -120,8 +120,7 @@ jobs:
           IPT_MAKEFILE=$(find /opt/rt-n56u/trunk/user/iptables -name Makefile | head -n 1)
           IPT_DIR=$(dirname "$IPT_MAKEFILE")
           
-          # 讀取 Makefile 內寫死的舊版本號 (通常是 iptables-1.8.7)
-          # 我們不動這個變數，讓 Makefile 以為還在編譯舊版
+          # 抓出 Makefile 內寫死的舊版本號 (例如 iptables-1.8.7)
           ORIG_VER_NAME=$(grep -o "iptables-[0-9]\+\.[0-9]\+\.[0-9]\+" "$IPT_MAKEFILE" | head -n1)
           
           echo "✅ 目標 Makefile: $IPT_MAKEFILE"
@@ -129,10 +128,23 @@ jobs:
           
           cd "$IPT_DIR"
           
-          # 2. 下載 Git 最新源碼 (目前是 1.8.11)
+          # 2. 下載 Git 源碼 (加入重試機制，解決 netfilter.org 不穩問題)
           echo "⬇️ Cloning iptables from git.netfilter.org..."
           rm -rf iptables-git
-          git clone --depth 1 https://git.netfilter.org/iptables iptables-git
+          
+          # 重試迴圈：最多試 5 次，每次間隔 10 秒
+          for i in {1..5}; do
+             echo "🔄 Attempt $i/5 to clone..."
+             git clone --depth 1 https://git.netfilter.org/iptables iptables-git && break
+             echo "⚠️ Clone failed, retrying in 10s..."
+             sleep 10
+          done
+          
+          # 檢查是否真的下載成功
+          if [ ! -d "iptables-git" ]; then
+             echo "❌ Critical Error: Git clone failed after 5 attempts."
+             exit 1
+          fi
           
           # 3. 偷天換日：刪除舊版源碼，放入新版源碼
           rm -rf "$ORIG_VER_NAME"
