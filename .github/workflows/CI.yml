@@ -114,7 +114,9 @@ jobs:
       # =======================================================
       - name: 🔥 Patch iptables 1.8.7 with 100 Fixes
         run: |
-          # 開啟詳細除錯模式，出錯時會顯示指令
+          # 關閉 set -e，確保單一檔案下載失敗不會讓整個流程崩潰
+          set +e
+          # 開啟詳細模式
           set -x
           
           echo "::group::Patching Iptables 1.8.7"
@@ -256,60 +258,79 @@ jobs:
               
               echo "---------------------------------------------------"
               echo "Processing Patch #$COUNT"
-              echo "📅 Date: $DATE"
-              echo "📝 Name: $RAW_NAME"
               
-              # ---------------------------------------------------
-              # 1. 強韌下載邏輯 (參考您的 Clone 重試機制)
-              # ---------------------------------------------------
+              # 定義偽裝 Headers
+              # 注意：sec-ch-ua 包含引號，這裡使用單引號包覆變數
+              local UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+              local ACCEPT="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+              local LANG="zh-TW,zh;q=0.9"
+              # 將 Referer 改為 git.netfilter.org 以符合 Same-Origin 政策
+              local REFERER="https://git.netfilter.org/iptables/"
+              
               local MAX_RETRIES=5
               local DOWNLOAD_SUCCESS=false
-              
+
+              # 加入隨機延遲 (2-5秒) 以模擬真人操作，避免觸發速率限制
+              local SLEEP_TIME=$(shuf -i 2-5 -n 1)
+              echo "⏳ Waiting ${SLEEP_TIME}s to mimic human behavior..."
+              sleep $SLEEP_TIME
+
               for ((i=1; i<=MAX_RETRIES; i++)); do
-                  # 嘗試 Wget (模擬瀏覽器 User-Agent)
-                  if wget --no-check-certificate --user-agent="Mozilla/5.0" -T 15 -t 1 -q -O "$PATCH_FILENAME" "$URL"; then
+                  # 嘗試 Wget
+                  if wget --no-check-certificate -q \
+                       --user-agent="$UA" \
+                       --header="Accept: $ACCEPT" \
+                       --header="Accept-Language: $LANG" \
+                       --header="Referer: $REFERER" \
+                       --header='sec-ch-ua: "Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"' \
+                       --header="sec-ch-ua-mobile: ?0" \
+                       --header='sec-ch-ua-platform: "Windows"' \
+                       -O "$PATCH_FILENAME" "$URL"; then
+                       
                       if [ -s "$PATCH_FILENAME" ]; then
-                          echo "✅ [Attempt $i/$MAX_RETRIES] Download Success (wget)"
+                          echo "✅ [Attempt $i] Download Success (wget)"
                           DOWNLOAD_SUCCESS=true
                           break
                       fi
                   fi
                   
-                  # 嘗試 Curl (作為備援)
-                  if curl -k -L --user-agent "Mozilla/5.0" --connect-timeout 15 --retry 1 -o "$PATCH_FILENAME" "$URL" 2>/dev/null; then
+                  # 嘗試 Curl (備援)
+                  if curl -k -L -s \
+                       -H "User-Agent: $UA" \
+                       -H "Accept: $ACCEPT" \
+                       -H "Accept-Language: $LANG" \
+                       -H "Referer: $REFERER" \
+                       -H 'sec-ch-ua: "Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"' \
+                       -H "sec-ch-ua-mobile: ?0" \
+                       -H 'sec-ch-ua-platform: "Windows"' \
+                       --connect-timeout 20 \
+                       -o "$PATCH_FILENAME" "$URL"; then
+                       
                       if [ -s "$PATCH_FILENAME" ]; then
-                          echo "✅ [Attempt $i/$MAX_RETRIES] Download Success (curl)"
+                          echo "✅ [Attempt $i] Download Success (curl)"
                           DOWNLOAD_SUCCESS=true
                           break
                       fi
                   fi
                   
-                  echo "⚠️ [Attempt $i/$MAX_RETRIES] Failed. Retrying in 3 seconds..."
-                  sleep 3
+                  echo "⚠️ [Attempt $i] Failed. Retrying in 5 seconds..."
+                  sleep 5
               done
               
-              # 如果多次嘗試後仍失敗
               if [ "$DOWNLOAD_SUCCESS" = false ]; then
                   echo "❌ Critical Error: Failed to download patch after $MAX_RETRIES attempts."
-                  echo "Patch #$COUNT ($DATE): Download Failed" >> failed_patches.log
-                  return 0 # 不中斷腳本，繼續下一個
+                  echo "Patch #$COUNT ($DATE) FAILED DOWNLOAD" >> failed_patches.log
+                  return 0
               fi
               
-              # ---------------------------------------------------
-              # 2. 寬容套用邏輯 (失敗不中斷)
-              # ---------------------------------------------------
+              # 套用 Patch (失敗不中斷)
               echo "🩹 Applying patch..."
-              # 使用 || true 確保即使 patch 失敗，腳本也不會因為 set -e 而退出
               if patch -p1 < "$PATCH_FILENAME"; then
-                  echo "✅ Patch Applied Successfully."
+                  echo "✅ Patch Applied."
               else
-                  echo "⚠️ Warning: Failed to apply patch (Skipping)."
-                  echo "Patch #$COUNT ($DATE): Apply Failed" >> failed_patches.log
-                  # 這裡移除了 exit 1，讓流程繼續
+                  echo "⚠️ Warning: Failed to apply patch."
+                  echo "Patch #$COUNT ($DATE) FAILED APPLY" >> failed_patches.log
               fi
-              
-              # [重要] 強制休息 1 秒，避免觸發伺服器速率限制 (Rate Limiting)
-              sleep 1
           }
 
           # -------------------------------------------------------
