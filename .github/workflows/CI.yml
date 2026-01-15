@@ -345,24 +345,37 @@ jobs:
               if [ "$DOWNLOAD_SUCCESS" = false ]; then
                   echo "❌ Critical Error: Failed to download patch after $MAX_RETRIES attempts."
                   echo "Patch #$COUNT ($DATE) FAILED DOWNLOAD" >> failed_patches.log
-                  # 即使下載失敗，也不要 return，繼續往下走 (虽然 patch 會失敗)
+                  # 即使下載失敗，也不要 return，繼續往下走 (雖然 patch 會失敗)
                   # 這是為了保持流程不中斷
               fi
               
               # ---------------------------------------------------
-              # 3. 寬容套用邏輯 (失敗不中斷)
+              # 3. 寬容套用邏輯 (Smart Permissive Patching)
               # ---------------------------------------------------
               if [ -f "$PATCH_FILENAME" ]; then
-                  echo "🩹 Applying patch..."
-                  # 使用 || true 確保即使 patch 失敗，腳本也不會因為 set -e 而退出
-                  if patch -p1 < "$PATCH_FILENAME"; then
-                      echo "✅ Patch Applied Successfully."
+                  echo "🩹 Applying patch (Permissive Mode)..."
+                  
+                  # 參數解析：
+                  # -p1 : 忽略第一層目錄 (標準)
+                  # -t (--batch) : 自動跳過詢問 (關鍵！遇到不存在的檔案自動略過)
+                  # -N (--forward) : 如果已修復過則跳過，不報錯
+                  # -l (--ignore-whitespace) : 忽略空白差異
+                  # -F 5 (--fuzz=5) : 允許 5 行內的上下文誤差 (解決行號不同問題)
+                  # --no-backup-if-mismatch : 不產生 .orig 垃圾檔
+                  # --reject-file=- : 拒絕的內容直接丟棄，不產生 .rej 檔，保持目錄乾淨
+                  
+                  # 使用 if 判斷，即使失敗也不會導致 set -e 觸發錯誤
+                  if patch -t -N -l -F 5 -p1 --no-backup-if-mismatch --reject-file=- < "$PATCH_FILENAME"; then
+                      echo "✅ Patch Fully/Partially Applied."
                   else
-                      echo "⚠️ Warning: Failed to apply patch."
-                      echo "Patch #$COUNT ($DATE) FAILED APPLY" >> failed_patches.log
+                      # patch 指令回傳非 0 通常代表「有部分 Hunk 失敗」
+                      # 但在我們的案例中，這可能是因為檔案不存在而被跳過，這是可接受的
+                      # 我們只記錄 Warning，不中斷流程
+                      echo "⚠️ Warning: Some hunks failed (likely missing files or huge drift)."
+                      echo "Patch #$COUNT ($DATE) PARTIAL/FAILED" >> failed_patches.log
                   fi
               else
-                  echo "⚠️ Warning: Patch file not found (Download failed previously)."
+                  echo "⚠️ Warning: Patch file missing."
               fi
           }
 
