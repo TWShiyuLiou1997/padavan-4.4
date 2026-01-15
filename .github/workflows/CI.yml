@@ -110,87 +110,34 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [嚴格修補版] iptables 1.8.7 (Apply 100 Patches)
+      # [修復版] iptables 1.8.7 Patch (Debug Mode)
       # =======================================================
       - name: 🔥 Patch iptables 1.8.7 with 100 Fixes
         run: |
+          # 開啟詳細除錯模式，出錯時會顯示指令
+          set -x
+          
           echo "::group::Patching Iptables 1.8.7"
           
-          # 定義目標路徑 (指向原始碼中的 iptables 目錄)
+          # 定義目標路徑
           IPT_ROOT="/opt/rt-n56u/trunk/user/iptables/iptables-1.8.7"
           
           if [ ! -d "$IPT_ROOT" ]; then
              echo "❌ Error: 找不到原始碼目錄 $IPT_ROOT"
+             ls -R /opt/rt-n56u/trunk/user/iptables/
              exit 1
           fi
           
           cd "$IPT_ROOT"
           echo "📂 Entered directory: $(pwd)"
 
-          # 建立存放 patch 的資料夾，方便稍後打包
+          # 建立存放 patch 的資料夾
           mkdir -p patches_archive
 
-          # =======================================================
-          # 定義下載與套用函數
-          # =======================================================
-          function download_and_apply() {
-              local DATE=$1
-              local RAW_NAME=$2
-              local URL=$3
-              local COUNT=$4
-              
-              # 1. 命名清洗：將非英數的符號轉為底線，保留日期以便排序
-              local SAFE_NAME=$(echo "$RAW_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
-              local PATCH_FILENAME="patches_archive/${COUNT}_${DATE}_${SAFE_NAME}.patch"
-              
-              echo "---------------------------------------------------"
-              echo "Processing Patch #$COUNT"
-              echo "📅 Date: $DATE"
-              echo "📝 Name: $RAW_NAME"
-              echo "🔗 URL: $URL"
-              
-              # 2. 下載流程 (雙協定/工具備援)
-              # 優先使用 wget，若失敗則使用 curl，確保下載成功
-              if wget --no-check-certificate -q -O "$PATCH_FILENAME" "$URL"; then
-                  echo "✅ Download Success (wget)"
-              elif curl -k -L -o "$PATCH_FILENAME" "$URL"; then
-                  echo "✅ Download Success (curl fallback)"
-              else
-                  echo "❌ Critical Error: Failed to download patch!"
-                  exit 1
-              fi
-              
-              # 3. 檢查檔案是否為空
-              if [ ! -s "$PATCH_FILENAME" ]; then
-                  echo "❌ Error: Downloaded patch is empty."
-                  exit 1
-              fi
-              
-              # 4. 套用 Patch
-              echo "🩹 Applying patch..."
-              if patch -p1 < "$PATCH_FILENAME"; then
-                  echo "✅ Patch Applied Successfully."
-              else
-                  echo "❌ Error: Failed to apply patch."
-                  # 若套用失敗，可能是已經修復過或衝突，視為嚴重錯誤停止
-                  exit 1
-              fi
-          }
-
-          # =======================================================
-          # 99個 Patch 清單 (格式: 日期|提交名稱|URL)
-          # =======================================================
-          # 使用 while read 逐行讀取
-          count=0
-          while IFS='|' read -r p_date p_name p_url; do
-              # 跳過空行或註釋
-              [[ -z "$p_date" || "$p_date" =~ ^# ]] && continue
-              
-              ((count++))
-              # 呼叫函數處理
-              download_and_apply "$p_date" "$p_name" "$p_url" "$count"
-              
-          done << 'EOF'
+          # -------------------------------------------------------
+          # 1. 先將清單寫入暫存檔 (避免 YAML HEREDOC 縮排錯誤)
+          # -------------------------------------------------------
+          cat << 'EOL' > patch_list.txt
           2021-06-07|libxtables: Fix memleak in xtopt_parse_hostmask()|https://git.netfilter.org/iptables/patch/?id=ffe88f8f01263687e82ef4d3d2bdc0cb5444711e
           2021-06-07|nft: Avoid memleak in error path of nft_cmd_new()|https://git.netfilter.org/iptables/patch/?id=eab75ed36a4f204ddab0c40ba42c5a300634d5c3
           2021-11-28|extensions: tcpmss: add iptables-translate support|https://git.netfilter.org/iptables/patch/?id=273d88a7744ea5638969ad3252acf518e5ec6cc2
@@ -289,12 +236,69 @@ jobs:
           2025-04-23|extensions: icmp: Support info-request/-reply type names|https://git.netfilter.org/iptables/patch/?id=1e6a2812971a268428b04b03520cd68cb61d76e3
           2025-07-04|extensions: sctp: Translate bare -m sctp match|https://git.netfilter.org/iptables/patch/?id=12e6b5ed65fd91ea413a2e45201289c3d01c4e29
           2025-07-22|xtables-monitor: Print -X command for base chains, too|https://git.netfilter.org/iptables/patch/?id=8cb0c13b7777e72ca6f4265845dc99eff7cdf679
-          EOF
+          EOL
+
+          # -------------------------------------------------------
+          # 2. 定義下載與套用邏輯 (移除 function 關鍵字以相容 sh)
+          # -------------------------------------------------------
+          download_and_apply() {
+              local DATE=$1
+              local RAW_NAME=$2
+              local URL=$3
+              local COUNT=$4
+              
+              # 命名清洗
+              local SAFE_NAME=$(echo "$RAW_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
+              local PATCH_FILENAME="patches_archive/${COUNT}_${DATE}_${SAFE_NAME}.patch"
+              
+              echo "---------------------------------------------------"
+              echo "Processing Patch #$COUNT"
+              echo "📅 Date: $DATE"
+              echo "📝 Name: $RAW_NAME"
+              
+              # 下載流程 (增加錯誤重試顯示)
+              if wget --no-check-certificate -q -O "$PATCH_FILENAME" "$URL"; then
+                  echo "✅ Download Success (wget)"
+              elif curl -k -L -o "$PATCH_FILENAME" "$URL"; then
+                  echo "✅ Download Success (curl fallback)"
+              else
+                  echo "❌ Critical Error: Failed to download patch!"
+                  exit 1
+              fi
+              
+              # 檢查檔案
+              if [ ! -s "$PATCH_FILENAME" ]; then
+                  echo "❌ Error: Downloaded patch is empty."
+                  exit 1
+              fi
+              
+              # 套用 Patch
+              echo "🩹 Applying patch..."
+              if patch -p1 < "$PATCH_FILENAME"; then
+                  echo "✅ Patch Applied Successfully."
+              else
+                  echo "❌ Error: Failed to apply patch."
+                  exit 1
+              fi
+          }
+
+          # -------------------------------------------------------
+          # 3. 讀取清單並執行 (使用 read 讀取剛剛生成的檔案)
+          # -------------------------------------------------------
+          count=0
+          while IFS='|' read -r p_date p_name p_url; do
+              # 跳過空行
+              [ -z "$p_date" ] && continue
+              
+              ((count++))
+              download_and_apply "$p_date" "$p_name" "$p_url" "$count"
+              
+          done < patch_list.txt
 
           echo "🎉 All 99 Upstream Patches applied successfully!"
 
           # =======================================================
-          # [第100號 Patch] 應用屏蔽警告補丁 (Smart Patching)
+          # [第100號 Patch] 應用屏蔽警告補丁
           # =======================================================
           echo "🔧 Generating warning suppression patch (Patch #100)..."
           
@@ -330,7 +334,6 @@ jobs:
           END_PATCH
 
           echo "🩹 Applying Custom Patch #100..."
-          # 這裡我們允許 patch 失敗 (如果已存在)，但會嚴格檢查結果
           patch -p1 < "$PATCH_100" || echo "⚠️ Patch return error (Might be already applied), checking verification..."
           
           echo "🔍 verifying code content..."
