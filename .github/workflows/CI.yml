@@ -290,7 +290,11 @@ jobs:
               # 跳過空行
               [ -z "$p_date" ] && continue
               
-              ((count++))
+              # [修正重點] Bash 算術運算陷阱修復：
+              # count++ 回傳值為 0 (False)，導致 set -e 觸發錯誤退出
+              # 改用標準賦值寫法
+              count=$((count+1))
+              
               download_and_apply "$p_date" "$p_name" "$p_url" "$count"
               
           done < patch_list.txt
