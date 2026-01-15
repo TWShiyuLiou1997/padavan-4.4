@@ -241,10 +241,16 @@ jobs:
           EOL
 
           # =======================================================
-          # 定義下載與套用函數 (強化重試與容錯版)
+          # 定義下載與套用函數 (極致偽裝版)
           # =======================================================
           # 初始化失敗清單檔案
           touch failed_patches.log
+          
+          # 優化全局網路設置 (影響 curl/wget/git)
+          git config --global http.postBuffer 524288000
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
+          git config --global http.sslVerify false
 
           download_and_apply() {
               local DATE=$1
@@ -259,77 +265,103 @@ jobs:
               echo "---------------------------------------------------"
               echo "Processing Patch #$COUNT"
               
-              # 定義偽裝 Headers
-              # 注意：sec-ch-ua 包含引號，這裡使用單引號包覆變數
+              # ---------------------------------------------------
+              # 定義偽裝 Headers (Chrome 144 / Windows 10)
+              # ---------------------------------------------------
               local UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+              # 注意：Header 值中的引號需要小心處理
+              local H_SEC_CH_UA='"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"'
+              local H_SEC_PLATFORM='"Windows"'
               local ACCEPT="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
-              local LANG="zh-TW,zh;q=0.9"
-              # 將 Referer 改為 git.netfilter.org 以符合 Same-Origin 政策
-              local REFERER="https://git.netfilter.org/iptables/"
+              local REFERER="https://git.netfilter.org/iptables/log/"
               
               local MAX_RETRIES=5
               local DOWNLOAD_SUCCESS=false
-
+              
               # 加入隨機延遲 (2-5秒) 以模擬真人操作，避免觸發速率限制
               local SLEEP_TIME=$(shuf -i 2-5 -n 1)
               echo "⏳ Waiting ${SLEEP_TIME}s to mimic human behavior..."
               sleep $SLEEP_TIME
 
               for ((i=1; i<=MAX_RETRIES; i++)); do
-                  # 嘗試 Wget
+                  # ---------------------------------------------------
+                  # 嘗試 1: Curl (功能最強大，偽裝最完整)
+                  # ---------------------------------------------------
+                  # 使用 -k (不驗證 SSL), -L (跟隨重定向), -s (靜默模式)
+                  if curl -k -L -s \
+                       -H "User-Agent: $UA" \
+                       -H "Accept: $ACCEPT" \
+                       -H "Accept-Language: zh-TW,zh;q=0.9" \
+                       -H "Referer: $REFERER" \
+                       -H "sec-ch-ua: $H_SEC_CH_UA" \
+                       -H "sec-ch-ua-mobile: ?0" \
+                       -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
+                       -H "upgrade-insecure-requests: 1" \
+                       -H "sec-fetch-site: same-origin" \
+                       -H "sec-fetch-mode: navigate" \
+                       -H "sec-fetch-user: ?1" \
+                       -H "sec-fetch-dest: document" \
+                       --connect-timeout 20 \
+                       --retry 2 \
+                       -o "$PATCH_FILENAME" "$URL"; then
+                       
+                      # 檢查檔案是否有效 (大於 0 bytes 且不包含 HTML 錯誤頁面特徵)
+                      if [ -s "$PATCH_FILENAME" ]; then
+                          # 簡單檢查內容是否像 patch (通常包含 diff --git 或 --- a/)
+                          if grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
+                              echo "✅ [Attempt $i] Download Success (curl)"
+                              DOWNLOAD_SUCCESS=true
+                              break
+                          else
+                              echo "⚠️ [Attempt $i] Downloaded file seems invalid (HTML error page?). Retrying..."
+                          fi
+                      fi
+                  fi
+                  
+                  # ---------------------------------------------------
+                  # 嘗試 2: Wget (備援方案)
+                  # ---------------------------------------------------
                   if wget --no-check-certificate -q \
                        --user-agent="$UA" \
                        --header="Accept: $ACCEPT" \
-                       --header="Accept-Language: $LANG" \
                        --header="Referer: $REFERER" \
-                       --header='sec-ch-ua: "Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"' \
-                       --header="sec-ch-ua-mobile: ?0" \
-                       --header='sec-ch-ua-platform: "Windows"' \
+                       --header="sec-ch-ua: $H_SEC_CH_UA" \
+                       --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
                        -O "$PATCH_FILENAME" "$URL"; then
                        
-                      if [ -s "$PATCH_FILENAME" ]; then
+                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
                           echo "✅ [Attempt $i] Download Success (wget)"
                           DOWNLOAD_SUCCESS=true
                           break
                       fi
                   fi
                   
-                  # 嘗試 Curl (備援)
-                  if curl -k -L -s \
-                       -H "User-Agent: $UA" \
-                       -H "Accept: $ACCEPT" \
-                       -H "Accept-Language: $LANG" \
-                       -H "Referer: $REFERER" \
-                       -H 'sec-ch-ua: "Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"' \
-                       -H "sec-ch-ua-mobile: ?0" \
-                       -H 'sec-ch-ua-platform: "Windows"' \
-                       --connect-timeout 20 \
-                       -o "$PATCH_FILENAME" "$URL"; then
-                       
-                      if [ -s "$PATCH_FILENAME" ]; then
-                          echo "✅ [Attempt $i] Download Success (curl)"
-                          DOWNLOAD_SUCCESS=true
-                          break
-                      fi
-                  fi
-                  
                   echo "⚠️ [Attempt $i] Failed. Retrying in 5 seconds..."
+                  rm -f "$PATCH_FILENAME" # 刪除可能的壞檔
                   sleep 5
               done
               
               if [ "$DOWNLOAD_SUCCESS" = false ]; then
                   echo "❌ Critical Error: Failed to download patch after $MAX_RETRIES attempts."
                   echo "Patch #$COUNT ($DATE) FAILED DOWNLOAD" >> failed_patches.log
-                  return 0
+                  # 即使下載失敗，也不要 return，繼續往下走 (虽然 patch 會失敗)
+                  # 這是為了保持流程不中斷
               fi
               
-              # 套用 Patch (失敗不中斷)
-              echo "🩹 Applying patch..."
-              if patch -p1 < "$PATCH_FILENAME"; then
-                  echo "✅ Patch Applied."
+              # ---------------------------------------------------
+              # 3. 寬容套用邏輯 (失敗不中斷)
+              # ---------------------------------------------------
+              if [ -f "$PATCH_FILENAME" ]; then
+                  echo "🩹 Applying patch..."
+                  # 使用 || true 確保即使 patch 失敗，腳本也不會因為 set -e 而退出
+                  if patch -p1 < "$PATCH_FILENAME"; then
+                      echo "✅ Patch Applied Successfully."
+                  else
+                      echo "⚠️ Warning: Failed to apply patch."
+                      echo "Patch #$COUNT ($DATE) FAILED APPLY" >> failed_patches.log
+                  fi
               else
-                  echo "⚠️ Warning: Failed to apply patch."
-                  echo "Patch #$COUNT ($DATE) FAILED APPLY" >> failed_patches.log
+                  echo "⚠️ Warning: Patch file not found (Download failed previously)."
               fi
           }
 
