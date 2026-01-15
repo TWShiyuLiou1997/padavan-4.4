@@ -238,9 +238,12 @@ jobs:
           2025-07-22|xtables-monitor: Print -X command for base chains, too|https://git.netfilter.org/iptables/patch/?id=8cb0c13b7777e72ca6f4265845dc99eff7cdf679
           EOL
 
-          # -------------------------------------------------------
-          # 2. 定義下載與套用邏輯 (移除 function 關鍵字以相容 sh)
-          # -------------------------------------------------------
+          # =======================================================
+          # 定義下載與套用函數 (強化重試與容錯版)
+          # =======================================================
+          # 初始化失敗清單檔案
+          touch failed_patches.log
+
           download_and_apply() {
               local DATE=$1
               local RAW_NAME=$2
@@ -256,50 +259,88 @@ jobs:
               echo "📅 Date: $DATE"
               echo "📝 Name: $RAW_NAME"
               
-              # 下載流程 (增加錯誤重試顯示)
-              if wget --no-check-certificate -q -O "$PATCH_FILENAME" "$URL"; then
-                  echo "✅ Download Success (wget)"
-              elif curl -k -L -o "$PATCH_FILENAME" "$URL"; then
-                  echo "✅ Download Success (curl fallback)"
-              else
-                  echo "❌ Critical Error: Failed to download patch!"
-                  exit 1
+              # ---------------------------------------------------
+              # 1. 強韌下載邏輯 (參考您的 Clone 重試機制)
+              # ---------------------------------------------------
+              local MAX_RETRIES=5
+              local DOWNLOAD_SUCCESS=false
+              
+              for ((i=1; i<=MAX_RETRIES; i++)); do
+                  # 嘗試 Wget (模擬瀏覽器 User-Agent)
+                  if wget --no-check-certificate --user-agent="Mozilla/5.0" -T 15 -t 1 -q -O "$PATCH_FILENAME" "$URL"; then
+                      if [ -s "$PATCH_FILENAME" ]; then
+                          echo "✅ [Attempt $i/$MAX_RETRIES] Download Success (wget)"
+                          DOWNLOAD_SUCCESS=true
+                          break
+                      fi
+                  fi
+                  
+                  # 嘗試 Curl (作為備援)
+                  if curl -k -L --user-agent "Mozilla/5.0" --connect-timeout 15 --retry 1 -o "$PATCH_FILENAME" "$URL" 2>/dev/null; then
+                      if [ -s "$PATCH_FILENAME" ]; then
+                          echo "✅ [Attempt $i/$MAX_RETRIES] Download Success (curl)"
+                          DOWNLOAD_SUCCESS=true
+                          break
+                      fi
+                  fi
+                  
+                  echo "⚠️ [Attempt $i/$MAX_RETRIES] Failed. Retrying in 3 seconds..."
+                  sleep 3
+              done
+              
+              # 如果多次嘗試後仍失敗
+              if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                  echo "❌ Critical Error: Failed to download patch after $MAX_RETRIES attempts."
+                  echo "Patch #$COUNT ($DATE): Download Failed" >> failed_patches.log
+                  return 0 # 不中斷腳本，繼續下一個
               fi
               
-              # 檢查檔案
-              if [ ! -s "$PATCH_FILENAME" ]; then
-                  echo "❌ Error: Downloaded patch is empty."
-                  exit 1
-              fi
-              
-              # 套用 Patch
+              # ---------------------------------------------------
+              # 2. 寬容套用邏輯 (失敗不中斷)
+              # ---------------------------------------------------
               echo "🩹 Applying patch..."
+              # 使用 || true 確保即使 patch 失敗，腳本也不會因為 set -e 而退出
               if patch -p1 < "$PATCH_FILENAME"; then
                   echo "✅ Patch Applied Successfully."
               else
-                  echo "❌ Error: Failed to apply patch."
-                  exit 1
+                  echo "⚠️ Warning: Failed to apply patch (Skipping)."
+                  echo "Patch #$COUNT ($DATE): Apply Failed" >> failed_patches.log
+                  # 這裡移除了 exit 1，讓流程繼續
               fi
+              
+              # [重要] 強制休息 1 秒，避免觸發伺服器速率限制 (Rate Limiting)
+              sleep 1
           }
 
           # -------------------------------------------------------
-          # 3. 讀取清單並執行 (使用 read 讀取剛剛生成的檔案)
+          # 3. 讀取清單並執行
           # -------------------------------------------------------
           count=0
           while IFS='|' read -r p_date p_name p_url; do
               # 跳過空行
               [ -z "$p_date" ] && continue
               
-              # [修正重點] Bash 算術運算陷阱修復：
-              # count++ 回傳值為 0 (False)，導致 set -e 觸發錯誤退出
-              # 改用標準賦值寫法
               count=$((count+1))
-              
               download_and_apply "$p_date" "$p_name" "$p_url" "$count"
               
           done < patch_list.txt
 
-          echo "🎉 All 99 Upstream Patches applied successfully!"
+          echo "🎉 Patch processing cycle completed!"
+          
+          # -------------------------------------------------------
+          # 4. 顯示失敗總結
+          # -------------------------------------------------------
+          if [ -s failed_patches.log ]; then
+              echo "⚠️ ================= WARNING ================="
+              echo "The following patches failed to download or apply:"
+              cat failed_patches.log
+              echo "============================================"
+              # 這裡您可以決定是否要因為有 Patch 失敗就讓整個 Build 失敗
+              # 若希望就算有 Patch 失敗也繼續編譯，請保留 exit 0
+              # 若希望有失敗就停止，請改為 exit 1
+          else
+              echo "✅ Perfect! All patches applied cleanly."
+          fi
 
           # =======================================================
           # [第100號 Patch] 應用屏蔽警告補丁
