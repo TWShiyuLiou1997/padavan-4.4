@@ -445,16 +445,22 @@ jobs:
           fi
           
           # =======================================================
-          # 🔍 無條件驗證代碼內容 (確保無論是否 Patch，狀態都透明)
+          # 🔍 無條件驗證代碼內容 (增強版：顯示程式碼上下文)
           # =======================================================
           echo "🔍 Verifying code content..."
           TARGET_FILE="libxtables/xtables.c"
           
           if [ -f "$TARGET_FILE" ]; then
+              # 檢查是否含有特徵碼 (#if 0 包裹著 Warning)
               if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
                   echo "✅ Verification Passed: Code is correctly patched!"
+                  echo "👇 Current Code Snippet (Looks Good):"
+                  # 顯示匹配行及其上下 3 行，方便人工確認
+                  grep -nC 3 "Warning: Extension %s is not supported" "$TARGET_FILE"
               else
                   echo "⚠️ Verification Failed: Code was NOT patched. (Warning suppression might not work)"
+                  echo "👇 Current Code Snippet (Original/Unpatched):"
+                  grep -nC 3 "Warning: Extension %s is not supported" "$TARGET_FILE"
               fi
           else
               echo "ℹ️ Verification skipped: Source file '$TARGET_FILE' not found yet."
