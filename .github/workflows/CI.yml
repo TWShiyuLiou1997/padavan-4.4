@@ -306,7 +306,8 @@ jobs:
           }
 
           # -------------------------------------------------------
-          # 2. 寫入 "乾淨版" Patch 清單 (已移除 毒藥 + 失敗 + 翻譯補丁)
+          # 2. 寫入 "乾淨版" Patch 清單 (Final Clean List)
+          # 已移除: xshared重構, xlate翻譯, ICMP解析重構
           # -------------------------------------------------------
           cat << 'EOL' > patch_list.txt
           2021-03-09|libxtables: Simplify xtables_ipmask_to_cidr() a bit|https://git.netfilter.org/iptables/patch/?id=831f57c7fbdc8d79e34b1d7d81ca6f6a8e6bae87
@@ -331,7 +332,6 @@ jobs:
           2022-07-23|extensions: libxt_conntrack: remove always-false conditionals|https://git.netfilter.org/iptables/patch/?id=e88085ac41b4c962e1d85dcc8dc6fa0d1f80dc12
           2022-10-02|extensions: TCPOPTSTRIP: Do not print empty options|https://git.netfilter.org/iptables/patch/?id=dba32a76aacf84181a9bd3ba1e301e59ab49d370
           2022-10-07|libiptc: Fix for segfault when renaming a chain|https://git.netfilter.org/iptables/patch/?id=97bf4e68fc0794adba3243fd96f40f4568e7216f
-          2022-11-15|extensions: Unify ICMP parser into libxt_icmp.h|https://git.netfilter.org/iptables/patch/?id=be8c6056040848b019e76e8b578598b35bae2655
           2022-12-02|iptables-xml: Free allocated chain strings|https://git.netfilter.org/iptables/patch/?id=73da7fb74c1089391dac0aca70e13e5f5999ace7
           2022-12-02|nft: Plug memleak in nft_rule_zero_counters()|https://git.netfilter.org/iptables/patch/?id=aa0c54030300441e9fd66c7016d0090f6736d449
           2022-12-02|iptables-restore: Free handle with --test also|https://git.netfilter.org/iptables/patch/?id=18880dbde615449d00a3e38f3713a19d4566258e
