@@ -110,34 +110,131 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [修復版] iptables 1.8.7 Patch (Debug Mode)
+      # [終極收集版] iptables Patch Collector & Patcher
       # =======================================================
-      - name: 🔥 Patch iptables 1.8.7 with 100 Fixes
+      - name: 🔥 Collect & Patch iptables (Enhanced Logic)
         run: |
-          # 關閉 set -e，確保單一檔案下載失敗不會讓整個流程崩潰
-          set +e
-          # 開啟詳細模式
-          set -x
+          set +e  # 關閉錯誤中斷，確保跑完全程
+          set -x  # 如果需要極致 Debug 可打開此行
           
-          echo "::group::Patching Iptables 1.8.7"
+          echo "::group::Patching Iptables 1.8.7 (Collector Mode)"
           
-          # 定義目標路徑
+          # =======================================================
+          # ⚙️ 設定區
+          # =======================================================
+          # 是否要執行套用 Patch？ (true=套用, false=僅下載收集)
+          APPLY_PATCHES=false
+          
           IPT_ROOT="/opt/rt-n56u/trunk/user/iptables/iptables-1.8.7"
+          PATCH_DIR="patches_archive"
+          LOG_FILE="patch_summary.log"
+          
+          # 優化全局網路設置
+          git config --global http.postBuffer 524288000
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
+          git config --global http.sslVerify false
           
           if [ ! -d "$IPT_ROOT" ]; then
              echo "❌ Error: 找不到原始碼目錄 $IPT_ROOT"
-             ls -R /opt/rt-n56u/trunk/user/iptables/
              exit 1
           fi
           
           cd "$IPT_ROOT"
-          echo "📂 Entered directory: $(pwd)"
+          mkdir -p "$PATCH_DIR"
+          touch "$LOG_FILE"
 
-          # 建立存放 patch 的資料夾
-          mkdir -p patches_archive
+          # =======================================================
+          # 🛠️ 定義核心函數
+          # =======================================================
+          download_and_process() {
+              local DATE=$1
+              local RAW_NAME=$2
+              local URL=$3
+              local COUNT=$4
+              
+              # 命名清洗
+              local SAFE_NAME=$(echo "$RAW_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
+              local PATCH_FILENAME="$PATCH_DIR/${COUNT}_${DATE}_${SAFE_NAME}.patch"
+              
+              echo "---------------------------------------------------"
+              echo "Processing Patch #$COUNT: $RAW_NAME"
+              
+              # 定義偽裝 Headers
+              local UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+              local ACCEPT="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+              local REFERER="https://git.netfilter.org/iptables/log/"
+              
+              local DOWNLOAD_SUCCESS=false
+              
+              # 隨機延遲 (避免被當機器人)
+              sleep $(shuf -i 1-3 -n 1)
+
+              # ---------------------------------------------------
+              # 下載策略 (三步曲)
+              # ---------------------------------------------------
+              
+              # 1. Wget HTTPS (最優先，快速)
+              if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                  if wget --no-check-certificate -q --user-agent="$UA" --header="Accept: $ACCEPT" --header="Referer: $REFERER" -O "$PATCH_FILENAME" "$URL"; then
+                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
+                          echo "✅ [Mode 1] Wget HTTPS Success"
+                          DOWNLOAD_SUCCESS=true
+                      fi
+                  fi
+              fi
+              
+              # 2. Wget HTTP (降級嘗試，有些防火牆對 HTTP 較寬鬆)
+              if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                  echo "⚠️ HTTPS failed, trying HTTP..."
+                  local HTTP_URL=$(echo "$URL" | sed 's/^https:/http:/')
+                  if wget --no-check-certificate -q --user-agent="$UA" -O "$PATCH_FILENAME" "$HTTP_URL"; then
+                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
+                          echo "✅ [Mode 2] Wget HTTP Success"
+                          DOWNLOAD_SUCCESS=true
+                      fi
+                  fi
+              fi
+              
+              # 3. Curl HTTPS (最強偽裝，最後手段)
+              if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                  echo "⚠️ Wget failed, switching to Curl..."
+                  rm -f "$PATCH_FILENAME"
+                  if curl -k -L -s -H "User-Agent: $UA" -H "Referer: $REFERER" --connect-timeout 20 --retry 2 -o "$PATCH_FILENAME" "$URL"; then
+                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
+                          echo "✅ [Mode 3] Curl HTTPS Success"
+                          DOWNLOAD_SUCCESS=true
+                      fi
+                  fi
+              fi
+
+              # ---------------------------------------------------
+              # 結果判定與執行
+              # ---------------------------------------------------
+              if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                  echo "❌ DOWNLOAD FAILED: $RAW_NAME"
+                  echo "[$DATE] #$COUNT DOWNLOAD_FAIL : $RAW_NAME" >> "$LOG_FILE"
+                  rm -f "$PATCH_FILENAME" # 清理無效檔案
+                  return 0
+              fi
+              
+              # 如果開關開啟，執行 Patch 套用
+              if [ "$APPLY_PATCHES" = true ]; then
+                  echo "🩹 Applying patch (Max Fuzz Mode)..."
+                  # -t: 自動跳過缺檔, -N: 跳過已修復, -F 10: 允許10行誤差
+                  if patch -t -N -l -F 10 -p1 --no-backup-if-mismatch --reject-file=- < "$PATCH_FILENAME"; then
+                      echo "✅ Patch Applied."
+                  else
+                      echo "⚠️ PATCH FAILED (Skipped/Mismatch)"
+                      echo "[$DATE] #$COUNT PATCH_FAIL : $RAW_NAME" >> "$LOG_FILE"
+                  fi
+              else
+                  echo "📦 Patch downloaded but NOT applied (Collection Mode)"
+              fi
+          }
 
           # -------------------------------------------------------
-          # 1. 寫入 Patch 清單 (嚴格依照日期排序：2021 -> 2025)
+          # 1. 寫入 Patch 清單
           # -------------------------------------------------------
           cat << 'EOL' > patch_list.txt
           2021-03-09|xtables-translate: Fix translation of odd netmasks|https://git.netfilter.org/iptables/patch/?id=46f9d3a9a61ee80fa94b7fa7b3b36045c92606ae
@@ -241,144 +338,8 @@ jobs:
           2025-07-22|xtables-monitor: Print -X command for base chains, too|https://git.netfilter.org/iptables/patch/?id=8cb0c13b7777e72ca6f4265845dc99eff7cdf679
           EOL
 
-          # =======================================================
-          # 定義下載與套用函數 (極致偽裝版)
-          # =======================================================
-          # 初始化失敗清單檔案
-          touch failed_patches.log
-          
-          # 最佳化全域網路設定 (影響 curl/wget/git)
-          git config --global http.postBuffer 524288000
-          git config --global http.lowSpeedLimit 0
-          git config --global http.lowSpeedTime 999999
-          git config --global http.sslVerify false
-
-          download_and_apply() {
-              local DATE=$1
-              local RAW_NAME=$2
-              local URL=$3
-              local COUNT=$4
-              
-              # 命名清洗
-              local SAFE_NAME=$(echo "$RAW_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
-              local PATCH_FILENAME="patches_archive/${COUNT}_${DATE}_${SAFE_NAME}.patch"
-              
-              echo "---------------------------------------------------"
-              echo "Processing Patch #$COUNT"
-              
-              # ---------------------------------------------------
-              # 定義偽裝 Headers (Chrome 144 / Windows 10)
-              # ---------------------------------------------------
-              local UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
-              # 注意：Header 值中的引號需要小心處理
-              local H_SEC_CH_UA='"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"'
-              local H_SEC_PLATFORM='"Windows"'
-              local ACCEPT="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
-              local REFERER="https://git.netfilter.org/iptables/log/"
-              
-              local MAX_RETRIES=5
-              local DOWNLOAD_SUCCESS=false
-              
-              # 加入隨機延遲 (2-5秒) 以模擬真人操作，避免觸發速率限制
-              local SLEEP_TIME=$(shuf -i 2-5 -n 1)
-              echo "⏳ Waiting ${SLEEP_TIME}s to mimic human behavior..."
-              sleep $SLEEP_TIME
-
-              for ((i=1; i<=MAX_RETRIES; i++)); do
-                  # ---------------------------------------------------
-                  # 嘗試 1: Curl (功能最強大，偽裝最完整)
-                  # ---------------------------------------------------
-                  # 使用 -k (不驗證 SSL), -L (跟隨重新導向), -s (靜音模式)
-                  if curl -k -L -s \
-                       -H "User-Agent: $UA" \
-                       -H "Accept: $ACCEPT" \
-                       -H "Accept-Language: zh-TW,zh;q=0.9" \
-                       -H "Referer: $REFERER" \
-                       -H "sec-ch-ua: $H_SEC_CH_UA" \
-                       -H "sec-ch-ua-mobile: ?0" \
-                       -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                       -H "upgrade-insecure-requests: 1" \
-                       -H "sec-fetch-site: same-origin" \
-                       -H "sec-fetch-mode: navigate" \
-                       -H "sec-fetch-user: ?1" \
-                       -H "sec-fetch-dest: document" \
-                       --connect-timeout 20 \
-                       --retry 2 \
-                       -o "$PATCH_FILENAME" "$URL"; then
-                       
-                      # 檢查檔案是否有效 (大於 0 bytes 且不包含 HTML 錯誤頁面特徵)
-                      if [ -s "$PATCH_FILENAME" ]; then
-                          # 簡單檢查內容是否像 patch (通常包含 diff --git 或 --- a/)
-                          if grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                              echo "✅ [Attempt $i] Download Success (curl)"
-                              DOWNLOAD_SUCCESS=true
-                              break
-                          else
-                              echo "⚠️ [Attempt $i] Downloaded file seems invalid (HTML error page?). Retrying..."
-                          fi
-                      fi
-                  fi
-                  
-                  # ---------------------------------------------------
-                  # 嘗試 2: Wget (備援方案)
-                  # ---------------------------------------------------
-                  if wget --no-check-certificate -q \
-                       --user-agent="$UA" \
-                       --header="Accept: $ACCEPT" \
-                       --header="Referer: $REFERER" \
-                       --header="sec-ch-ua: $H_SEC_CH_UA" \
-                       --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                       -O "$PATCH_FILENAME" "$URL"; then
-                       
-                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Attempt $i] Download Success (wget)"
-                          DOWNLOAD_SUCCESS=true
-                          break
-                      fi
-                  fi
-                  
-                  echo "⚠️ [Attempt $i] Failed. Retrying in 5 seconds..."
-                  rm -f "$PATCH_FILENAME" # 刪除可能的壞檔
-                  sleep 5
-              done
-              
-              if [ "$DOWNLOAD_SUCCESS" = false ]; then
-                  echo "❌ Critical Error: Failed to download patch after $MAX_RETRIES attempts."
-                  echo "Patch #$COUNT ($DATE) FAILED DOWNLOAD" >> failed_patches.log
-                  # 即使下載失敗，也不要 return，繼續往下走 (雖然 patch 會失敗)
-                  # 這是為了保持流程不中斷
-              fi
-              
-              # ---------------------------------------------------
-              # 3. 最大化寬容套用邏輯 (Max Fuzz Mode)
-              # ---------------------------------------------------
-              if [ -f "$PATCH_FILENAME" ]; then
-                  echo "🩹 Applying patch (Ultimate Tolerance Mode)..."
-                  
-                  # 參數解析：
-                  # -t (--batch) : 自動跳過不存在的檔案，不詢問
-                  # -N (--forward) : 若已修復過則跳過，不報錯
-                  # -l (--ignore-whitespace) : 忽略所有空白與換行差異
-                  # -F 10 (--fuzz=10) : 【關鍵】允許 10 行誤差！
-                  #    標準 Patch 上下文通常只有 3 行。設為 10 代表「完全不看上下文，只找內容」。
-                  # --no-backup-if-mismatch : 不產生垃圾檔
-                  # --reject-file=- : 失敗的內容直接丟棄
-                  
-                  if patch -t -N -l -F 10 -p1 --no-backup-if-mismatch --reject-file=- < "$PATCH_FILENAME"; then
-                      echo "✅ Patch Applied (Forced Match)."
-                  else
-                      # 如果這樣還失敗，代表該段程式碼在 1.8.7 根本不存在（連相似的都沒有）
-                      # 或是檔案完全缺失。這是預期中的「無效 Patch」，我們將其忽略。
-                      echo "⚠️ Warning: Patch skipped (Content not found in source)."
-                      echo "Patch #$COUNT ($DATE) SKIPPED/MISSING" >> failed_patches.log
-                  fi
-              else
-                  echo "⚠️ Warning: Patch file missing."
-              fi
-          }
-
           # -------------------------------------------------------
-          # 3. 讀取清單並執行
+          # 2. 讀取清單並執行
           # -------------------------------------------------------
           count=0
           while IFS='|' read -r p_date p_name p_url; do
@@ -386,25 +347,18 @@ jobs:
               [ -z "$p_date" ] && continue
               
               count=$((count+1))
-              download_and_apply "$p_date" "$p_name" "$p_url" "$count"
+              download_and_process "$p_date" "$p_name" "$p_url" "$count"
               
           done < patch_list.txt
 
           echo "🎉 Patch processing cycle completed!"
           
-          # -------------------------------------------------------
-          # 4. 顯示失敗總結
-          # -------------------------------------------------------
-          if [ -s failed_patches.log ]; then
-              echo "⚠️ ================= WARNING ================="
-              echo "The following patches failed to download or apply:"
-              cat failed_patches.log
-              echo "============================================"
-              # 這裡您可以決定是否要因為有 Patch 失敗就讓整個 Build 失敗
-              # 若希望就算有 Patch 失敗也繼續編譯，請保留 exit 0
-              # 若希望有失敗就停止，請改為 exit 1
+          if [ -s "$LOG_FILE" ]; then
+              echo "⚠️ ================= SUMMARY ================="
+              cat "$LOG_FILE"
+              echo "=========================================="
           else
-              echo "✅ Perfect! All patches applied cleanly."
+              echo "✅ Perfect! No errors recorded."
           fi
 
           # =======================================================
@@ -412,7 +366,7 @@ jobs:
           # =======================================================
           echo "🔧 Generating warning suppression patch (Patch #100)..."
           
-          PATCH_100="patches_archive/100_Custom_Suppress_Warnings.patch"
+          PATCH_100="$PATCH_DIR/100_Custom_Suppress_Warnings.patch"
           
           # 注意：這裡嘗試針對 1.8.7 的行號進行微調，但仍可能失敗
           cat << 'END_PATCH' > "$PATCH_100"
@@ -444,25 +398,27 @@ jobs:
            	for (ptr = xtables_targets; ptr; ptr = ptr->next) {
           END_PATCH
 
-          echo "🩹 Applying Custom Patch #100..."
-          # 使用 fuzz 參數允許些微的行號差異，增加成功率
-          if patch -p1 --fuzz=3 < "$PATCH_100"; then
-              echo "✅ Patch #100 Applied Successfully!"
+          # 只有在開啟套用模式時才執行
+          if [ "$APPLY_PATCHES" = true ]; then
+              echo "🩹 Applying Custom Patch #100..."
+              # 使用 fuzz 參數允許些微的行號差異，增加成功率
+              if patch -t -N -l -F 10 -p1 --no-backup-if-mismatch < "$PATCH_100"; then
+                  echo "✅ Patch #100 Applied Successfully!"
+              else
+                  echo "⚠️ Patch #100 Failed to apply (Context mismatch)."
+                  # 這裡不 exit，讓流程繼續
+              fi
+              
+              echo "🔍 verifying code content..."
+              TARGET_FILE="libxtables/xtables.c"
+              
+              if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
+                  echo "✅ Verification Passed: Code is correctly patched!"
+              else
+                  echo "⚠️ Verification Failed: Code was NOT patched. (Warning suppression might not work)"
+              fi
           else
-              echo "⚠️ Patch #100 Failed to apply (Context mismatch)."
-              # 這裡不 exit，讓流程繼續
-          fi
-          
-          echo "🔍 verifying code content..."
-          TARGET_FILE="libxtables/xtables.c"
-          
-          if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
-              echo "✅ Verification Passed: Code is correctly patched!"
-          else
-              echo "⚠️ Verification Failed: Code was NOT patched. (Warning suppression might not work)"
-              echo "⚠️ This is expected if the source code differs significantly from the patch."
-              # [修正] 移除 exit 1，允許編譯繼續進行
-              # exit 1 
+              echo "📦 Custom Patch #100 generated but NOT applied."
           fi
           
           echo "::endgroup::"
