@@ -428,24 +428,37 @@ jobs:
           # 只有在開啟套用模式時才執行
           if [ "$APPLY_PATCHES" = true ]; then
               echo "🩹 Applying Custom Patch #100..."
-              # 使用 fuzz 參數允許些微的行號差異，增加成功率
-              if patch -t -N -l -F 10 -p1 --no-backup-if-mismatch < "$PATCH_100"; then
-                  echo "✅ Patch #100 Applied Successfully!"
-              else
-                  echo "⚠️ Patch #100 Failed to apply (Context mismatch)."
-                  # 這裡不 exit，讓流程繼續
+              
+              # 嘗試直接 Patch (針對已解壓的情況)
+              # 加個簡單判斷避免 clean build 報錯，但主要依賴 Makefile 注入
+              if [ -f "libxtables/xtables.c" ]; then
+                  if patch -t -N -l -F 10 -p1 --no-backup-if-mismatch < "$PATCH_100"; then
+                      echo "✅ Patch #100 Applied Successfully!"
+                  else
+                      echo "⚠️ Patch #100 Failed to apply (Context mismatch)."
+                  fi
               fi
               
-              echo "🔍 verifying code content..."
-              TARGET_FILE="libxtables/xtables.c"
-              
+              echo "📦 Patch #100 ready for Makefile injection."
+          else
+              echo "📦 Custom Patch #100 generated but NOT applied."
+          fi
+          
+          # =======================================================
+          # 🔍 無條件驗證代碼內容 (確保無論是否 Patch，狀態都透明)
+          # =======================================================
+          echo "🔍 Verifying code content..."
+          TARGET_FILE="libxtables/xtables.c"
+          
+          if [ -f "$TARGET_FILE" ]; then
               if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
                   echo "✅ Verification Passed: Code is correctly patched!"
               else
                   echo "⚠️ Verification Failed: Code was NOT patched. (Warning suppression might not work)"
               fi
           else
-              echo "📦 Custom Patch #100 generated but NOT applied."
+              echo "ℹ️ Verification skipped: Source file '$TARGET_FILE' not found yet."
+              echo "   (This is normal for a clean build before compilation starts)"
           fi
           
           echo "::endgroup::"
@@ -779,26 +792,54 @@ jobs:
               echo "⚠️ Warning: build.log not found in trunk/"
           fi
 
-          # 2. 收集 iptables Debug 檔案 (含所有 100 個 Patches)
-          echo "Collecting Iptables Patches..."
-          mkdir -p "$PACK_DIR/debug_iptables"
-          
-          # 原始碼位置 (需與上方 Patch 步驟一致)
+          # =======================================================
+          # 🔥 2. 強化：收集 iptables 相關產物 (智慧驗證版)
+          # =======================================================
+          # 定義 Padavan 4.4 的 iptables 路徑
           IPT_SRC_DIR="$WORK_DIR/trunk/user/iptables/iptables-1.8.7"
           PATCH_ARCHIVE_DIR="$IPT_SRC_DIR/patches_archive"
+          DEBUG_DIR="$PACK_DIR/debug_iptables"
           
-          # 複製我們剛剛下載並產生的 100 個 patches
+          mkdir -p "$DEBUG_DIR"
+          
+          # 2.1 收集 Patch 檔案
           if [ -d "$PATCH_ARCHIVE_DIR" ]; then
-              cp "$PATCH_ARCHIVE_DIR"/*.patch "$PACK_DIR/debug_iptables/"
-              echo "✅ All 100 patches collected."
+              cp "$PATCH_ARCHIVE_DIR"/*.patch "$DEBUG_DIR/"
+              echo "✅ All patches collected in debug_iptables"
           else
               echo "⚠️ Warning: Patches archive directory not found!"
           fi
           
-          # 複製被修改後的關鍵原始碼以供查驗
-          if [ -f "$IPT_SRC_DIR/libxtables/xtables.c" ]; then
-              cp "$IPT_SRC_DIR/libxtables/xtables.c" "$PACK_DIR/debug_iptables/xtables_patched.c"
+          # 2.2 收集 Patch 過程日誌
+          if [ -f "$IPT_SRC_DIR/patch_summary.log" ]; then
+              cp "$IPT_SRC_DIR/patch_summary.log" "$DEBUG_DIR/patch_summary.log"
+              echo "✅ patch_summary.log collected"
           fi
+
+          # 2.3 智慧複製 xtables.c (根據內容決定檔名)
+          TARGET_FILE="$IPT_SRC_DIR/libxtables/xtables.c"
+          
+          if [ -f "$TARGET_FILE" ]; then
+              # 檢查是否含有我們 Patch #100 的特徵碼 (屏蔽警告的 if 0)
+              if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
+                  # 判定為已 Patch
+                  cp "$TARGET_FILE" "$DEBUG_DIR/xtables_patched.c"
+                  echo "✅ Detected PATCHED xtables.c - Saving as xtables_patched.c"
+              else
+                  # 判定為未 Patch (原版或 Patch 失敗)
+                  cp "$TARGET_FILE" "$DEBUG_DIR/xtables_original.c"
+                  echo "ℹ️ Detected UNPATCHED xtables.c - Saving as xtables_original.c"
+              fi
+          else
+               echo "⚠️ Warning: xtables.c not found (Maybe build failed or path differs)"
+          fi
+          
+          # 2.4 額外收集 config.log
+          if [ -f "$IPT_SRC_DIR/config.log" ]; then
+              cp "$IPT_SRC_DIR/config.log" "$DEBUG_DIR/config.log"
+              echo "✅ config.log collected"
+          fi
+          # =======================================================
 
           # 3. 移動韌體檔案到打包目錄
           if [ -f "$IMAGES_DIR/${{ env.FINAL_FILENAME }}" ]; then
