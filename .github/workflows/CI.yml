@@ -145,7 +145,7 @@ jobs:
           touch "$LOG_FILE"
 
           # =======================================================
-          # 🛠️ 定義核心函數 (完美真人模擬：Log -> Commit -> Patch)
+          # 🛠️ V4 終極函數: 混合策略 (低頻請求 + 動態偽裝 + 自動清洗)
           # =======================================================
           download_and_process() {
               local DATE=$1
@@ -156,90 +156,98 @@ jobs:
               # 命名清洗
               local SAFE_NAME=$(echo "$RAW_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
               local PATCH_FILENAME="$PATCH_DIR/${COUNT}_${DATE}_${SAFE_NAME}.patch"
-              local COOKIE_FILE="cookies.txt"  # 用於儲存 Session
+              local COOKIE_FILE="cookies.txt"
               
               echo "---------------------------------------------------"
               echo "Processing Patch #$COUNT: $RAW_NAME"
-              
-              # 1. 動態生成 User-Agent (微調版本號，避免特徵僵化)
-              local MINOR_VER=$((RANDOM % 100))
-              local UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.${MINOR_VER}.0 Safari/537.36"
-              
-              # 2. 定義偽裝 Headers
+
+              # [戰略 1] 降低特徵變更頻率：每 10 個檔案才換一次 UA
+              # 模擬同一個人在同一個瀏覽器視窗操作，而不是精神分裂每秒換一個版本
+              if [ $((COUNT % 10)) -eq 1 ] || [ ! -f ua_cache.txt ]; then
+                  local MINOR_VER=$((RANDOM % 100))
+                  echo "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.${MINOR_VER}.0 Safari/537.36" > ua_cache.txt
+                  # 同時重置 Cookie，模擬新 Session
+                  rm -f "$COOKIE_FILE"
+                  echo "🔄 Session Rotate: New UA & Cookies generated."
+              fi
+              local UA=$(cat ua_cache.txt)
+
+              # [戰略 2] Header 固定化
               local H_SEC_CH_UA='"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"'
               local H_SEC_PLATFORM='"Windows"'
-              local ACCEPT_PAGE="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+              local H_LANG="en-US,en;q=0.9" 
               local ACCEPT_FILE="text/x-diff,text/plain,application/octet-stream;q=0.9,*/*;q=0.8"
               
-              # 3. 計算 URL 邏輯
-              # 目標 Patch: .../patch/?id=xxx
-              # 對應 Commit: .../commit/?id=xxx
-              # 列表頁 Log: https://git.netfilter.org/iptables/log/
+              # 計算 URL
               local COMMIT_URL=$(echo "$URL" | sed 's|/patch/|/commit/|')
               local LOG_URL="https://git.netfilter.org/iptables/log/"
               
-              # 4. 隨機延遲 (模擬人類閱讀/尋找時間，2-5秒)
-              sleep $(shuf -i 2-5 -n 1)
+              # [戰略 3] 隨機長休息 (Human Fatigue)
+              # 在 #30, #60, #90 附近隨機進行長休息，避開 V3 在 #33 被殺的門檻
+              if [ $((COUNT % 30)) -eq 0 ]; then
+                  local SLEEP_LONG=$(shuf -i 20-40 -n 1)
+                  echo "☕ Coffee Break: Sleeping for ${SLEEP_LONG}s..."
+                  sleep $SLEEP_LONG
+              else
+                  # 一般隨機延遲 2-4 秒
+                  sleep $(shuf -i 2-4 -n 1)
+              fi
 
               # ===================================================
-              # 關鍵步驟：模擬「瀏覽 Commit 頁面」 (Pre-flight)
-              # ===================================================
-              # 為了不被判定為只抓檔的機器人，我們先請求 Commit 頁面
-              # 這樣伺服器日誌會記錄：IP 訪問了頁面 -> IP 下載了檔案 (合理邏輯)
-              echo "👀 Visiting Commit Page first (Simulating human view)..."
-              
-              # 這裡的 Referer 設為 Log 頁面 (假裝從列表點進來)
-              # 或是上一次的 Commit 頁面 (如果想模擬連續瀏覽)
-              # 為了穩健，我們主要模擬「從列表點進來」
-              curl -k -L -s -o /dev/null \
-                   -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-                   -H "User-Agent: $UA" \
-                   -H "Accept: $ACCEPT_PAGE" \
-                   -H "Referer: $LOG_URL" \
-                   -H "sec-ch-ua: $H_SEC_CH_UA" \
-                   -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                   -H "sec-fetch-dest: document" \
-                   -H "sec-fetch-mode: navigate" \
-                   -H "sec-fetch-site: same-origin" \
-                   "$COMMIT_URL"
-                   
-              # 短暫休息，模擬人類看到頁面後，移動滑鼠去點 "(patch)" 的時間
-              sleep $(shuf -i 1-2 -n 1)
-
-              # ===================================================
-              # 執行下載：從 Commit 頁面點擊 Patch
+              # 執行下載
               # ===================================================
               local MAX_RETRIES=5
               local DOWNLOAD_SUCCESS=false
 
               for ((i=1; i<=MAX_RETRIES; i++)); do
-                  # 計算退避時間
-                  local BACKOFF_TIME=$((5 * i))
+                  local BACKOFF_TIME=$((5 * i + 5))
                   
-                  # 策略 A: Curl (Referer 嚴格設為 Commit 頁面)
+                  # 決定是否要「演全套」(請求 Commit 頁面)
+                  # V3 失敗是因為每次都演，導致請求量爆炸。
+                  # V4 策略：只有 20% 機率演全套，或者失敗重試時才演。
+                  local PREFLIGHT_DONE=false
+                  if [ $((RANDOM % 5)) -eq 0 ] || [ $i -gt 1 ]; then
+                      echo "🎭 Performing Pre-flight check (Visiting Commit Page)..."
+                      curl -k -L -s -o /dev/null \
+                           -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+                           -H "User-Agent: $UA" \
+                           -H "Referer: $LOG_URL" \
+                           "$COMMIT_URL"
+                      sleep 1
+                      PREFLIGHT_DONE=true
+                  fi
+
+                  # 設定 Referer
+                  # 如果剛才演過全套，Referer 就是 Commit 頁 (真實)
+                  # 如果沒演，Referer 設為 Log 列表頁 (V1 的成功經驗)
+                  if [ "$PREFLIGHT_DONE" = true ]; then
+                      local CUR_REFERER="$COMMIT_URL"
+                  else
+                      local CUR_REFERER="$LOG_URL"
+                  fi
+
+                  # 嘗試下載
                   if curl -k -L -s \
                        -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
                        -H "User-Agent: $UA" \
                        -H "Accept: $ACCEPT_FILE" \
-                       -H "Referer: $COMMIT_URL" \
+                       -H "Accept-Language: $H_LANG" \
+                       -H "Referer: $CUR_REFERER" \
                        -H "sec-ch-ua: $H_SEC_CH_UA" \
-                       -H "sec-ch-ua-mobile: ?0" \
                        -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                       -H "upgrade-insecure-requests: 1" \
-                       -H "sec-fetch-site: same-origin" \
-                       -H "sec-fetch-mode: navigate" \
-                       -H "sec-fetch-user: ?1" \
-                       -H "sec-fetch-dest: document" \
                        --connect-timeout 20 \
                        --retry 2 \
                        -o "$PATCH_FILENAME" "$URL"; then
-                       
+                      
+                      # 驗證內容
                       if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Attempt $i] Download Success (Verified)"
+                          echo "✅ [Attempt $i] Download Success"
                           DOWNLOAD_SUCCESS=true
                           break
                       else
-                          echo "⚠️ [Attempt $i] Invalid content (Anti-Bot?)"
+                          echo "⚠️ Invalid content detected. Rotating identity..."
+                          # 內容錯誤，立即刪除 Cookie 和 UA Cache 強制換身份
+                          rm -f "$COOKIE_FILE" "ua_cache.txt"
                       fi
                   fi
                   
