@@ -145,7 +145,7 @@ jobs:
           touch "$LOG_FILE"
 
           # =======================================================
-          # 🛠️ 定義核心函數 (Cookie Jar + 指數退避 + 動態偽裝)
+          # 🛠️ 定義核心函數 (極致偽裝 + Commit Referer + Cookie)
           # =======================================================
           download_and_process() {
               local DATE=$1
@@ -170,15 +170,10 @@ jobs:
               local H_SEC_PLATFORM='"Windows"'
               local ACCEPT="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
               
-              # [技巧] 動態 Referer：如果有上一個 Patch，就假裝是從那邊點過來的
-              # 第一次請求使用列表頁，之後使用「自己」作為 Referer (模擬刷新) 或上一個 URL
-              if [ -z "$LAST_URL" ]; then
-                  local REFERER="https://git.netfilter.org/iptables/log/"
-              else
-                  local REFERER="$LAST_URL"
-              fi
-              # 更新全域變數供下次使用
-              LAST_URL="$URL"
+              # [技巧] 智慧 Referer 偽裝
+              # 將 patch URL (patch/?id=xxx) 轉換為 commit URL (commit/?id=xxx) 作為 Referer
+              # 模擬使用者是從 Commit 頁面點擊 "(patch)" 連結過來的
+              local REFERER=$(echo "$URL" | sed 's|/patch/|/commit/|')
               
               local MAX_RETRIES=5
               local DOWNLOAD_SUCCESS=false
@@ -191,9 +186,8 @@ jobs:
                   local BACKOFF_TIME=$((5 * i))
                   
                   # ---------------------------------------------------
-                  # 策略 A: Curl (帶 Cookie Jar)
+                  # 策略 A: Curl (帶 Cookie Jar + Commit Referer)
                   # ---------------------------------------------------
-                  # -c : 寫入 Cookie, -b : 讀取 Cookie
                   if curl -k -L -s \
                        -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
                        -H "User-Agent: $UA" \
@@ -224,7 +218,6 @@ jobs:
                   # ---------------------------------------------------
                   # 策略 B: Wget (不帶 Cookie，嘗試乾淨請求)
                   # ---------------------------------------------------
-                  # 如果 Curl 失敗，可能是 Cookie 被髒了，試試用 Wget 發乾淨請求
                   echo "⚠️ Curl failed. Trying clean Wget request..."
                   rm -f "$PATCH_FILENAME"
                   
