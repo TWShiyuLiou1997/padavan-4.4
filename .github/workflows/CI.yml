@@ -145,7 +145,7 @@ jobs:
           touch "$LOG_FILE"
 
           # =======================================================
-          # 🛠️ 定義核心函數 (極致偽裝 + Commit Referer + Cookie)
+          # 🛠️ 定義核心函數 (完美真人模擬：Log -> Commit -> Patch)
           # =======================================================
           download_and_process() {
               local DATE=$1
@@ -161,38 +161,67 @@ jobs:
               echo "---------------------------------------------------"
               echo "Processing Patch #$COUNT: $RAW_NAME"
               
-              # 動態生成 User-Agent (微調版本號，避免特徵完全一致)
+              # 1. 動態生成 User-Agent (微調版本號，避免特徵僵化)
               local MINOR_VER=$((RANDOM % 100))
               local UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.${MINOR_VER}.0 Safari/537.36"
               
-              # 定義偽裝 Headers
+              # 2. 定義偽裝 Headers
               local H_SEC_CH_UA='"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"'
               local H_SEC_PLATFORM='"Windows"'
-              local ACCEPT="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+              local ACCEPT_PAGE="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+              local ACCEPT_FILE="text/x-diff,text/plain,application/octet-stream;q=0.9,*/*;q=0.8"
               
-              # [技巧] 智慧 Referer 偽裝
-              # 將 patch URL (patch/?id=xxx) 轉換為 commit URL (commit/?id=xxx) 作為 Referer
-              # 模擬使用者是從 Commit 頁面點擊 "(patch)" 連結過來的
-              local REFERER=$(echo "$URL" | sed 's|/patch/|/commit/|')
+              # 3. 計算 URL 邏輯
+              # 目標 Patch: .../patch/?id=xxx
+              # 對應 Commit: .../commit/?id=xxx
+              # 列表頁 Log: https://git.netfilter.org/iptables/log/
+              local COMMIT_URL=$(echo "$URL" | sed 's|/patch/|/commit/|')
+              local LOG_URL="https://git.netfilter.org/iptables/log/"
               
+              # 4. 隨機延遲 (模擬人類閱讀/尋找時間，2-5秒)
+              sleep $(shuf -i 2-5 -n 1)
+
+              # ===================================================
+              # 關鍵步驟：模擬「瀏覽 Commit 頁面」 (Pre-flight)
+              # ===================================================
+              # 為了不被判定為只抓檔的機器人，我們先請求 Commit 頁面
+              # 這樣伺服器日誌會記錄：IP 訪問了頁面 -> IP 下載了檔案 (合理邏輯)
+              echo "👀 Visiting Commit Page first (Simulating human view)..."
+              
+              # 這裡的 Referer 設為 Log 頁面 (假裝從列表點進來)
+              # 或是上一次的 Commit 頁面 (如果想模擬連續瀏覽)
+              # 為了穩健，我們主要模擬「從列表點進來」
+              curl -k -L -s -o /dev/null \
+                   -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+                   -H "User-Agent: $UA" \
+                   -H "Accept: $ACCEPT_PAGE" \
+                   -H "Referer: $LOG_URL" \
+                   -H "sec-ch-ua: $H_SEC_CH_UA" \
+                   -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
+                   -H "sec-fetch-dest: document" \
+                   -H "sec-fetch-mode: navigate" \
+                   -H "sec-fetch-site: same-origin" \
+                   "$COMMIT_URL"
+                   
+              # 短暫休息，模擬人類看到頁面後，移動滑鼠去點 "(patch)" 的時間
+              sleep $(shuf -i 1-2 -n 1)
+
+              # ===================================================
+              # 執行下載：從 Commit 頁面點擊 Patch
+              # ===================================================
               local MAX_RETRIES=5
               local DOWNLOAD_SUCCESS=false
-              
-              # 初始隨機延遲 (2-4秒)
-              sleep $(shuf -i 2-4 -n 1)
 
               for ((i=1; i<=MAX_RETRIES; i++)); do
-                  # 計算退避時間：失敗次數越多，等待越久 (5s, 10s, 20s...)
+                  # 計算退避時間
                   local BACKOFF_TIME=$((5 * i))
                   
-                  # ---------------------------------------------------
-                  # 策略 A: Curl (帶 Cookie Jar + Commit Referer)
-                  # ---------------------------------------------------
+                  # 策略 A: Curl (Referer 嚴格設為 Commit 頁面)
                   if curl -k -L -s \
                        -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
                        -H "User-Agent: $UA" \
-                       -H "Accept: $ACCEPT" \
-                       -H "Referer: $REFERER" \
+                       -H "Accept: $ACCEPT_FILE" \
+                       -H "Referer: $COMMIT_URL" \
                        -H "sec-ch-ua: $H_SEC_CH_UA" \
                        -H "sec-ch-ua-mobile: ?0" \
                        -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
@@ -205,42 +234,39 @@ jobs:
                        --retry 2 \
                        -o "$PATCH_FILENAME" "$URL"; then
                        
-                      # 驗證檔案內容
                       if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Attempt $i] Download Success (Curl + Cookie)"
+                          echo "✅ [Attempt $i] Download Success (Verified)"
                           DOWNLOAD_SUCCESS=true
                           break
                       else
-                          echo "⚠️ [Attempt $i] Invalid content detected (Anti-Bot page?)"
+                          echo "⚠️ [Attempt $i] Invalid content (Anti-Bot?)"
                       fi
                   fi
                   
-                  # ---------------------------------------------------
-                  # 策略 B: Wget (不帶 Cookie，嘗試乾淨請求)
-                  # ---------------------------------------------------
-                  echo "⚠️ Curl failed. Trying clean Wget request..."
+                  # 策略 B: Wget (Clean Request)
+                  # 如果 Curl 失敗，可能是 Cookie 問題，用 Wget 嘗試無 Cookie 下載
+                  # 但 Referer 依然要騙它是從 Commit 頁面來的
+                  echo "⚠️ Curl failed. Switching to Wget..."
                   rm -f "$PATCH_FILENAME"
                   
                   if wget --no-check-certificate -q \
                        --user-agent="$UA" \
-                       --header="Accept: $ACCEPT" \
-                       --header="Referer: $REFERER" \
+                       --header="Accept: $ACCEPT_FILE" \
+                       --header="Referer: $COMMIT_URL" \
                        --header="sec-ch-ua: $H_SEC_CH_UA" \
                        --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
                        -O "$PATCH_FILENAME" "$URL"; then
                        
                       if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Attempt $i] Download Success (Wget Clean)"
+                          echo "✅ [Attempt $i] Download Success (Wget)"
                           DOWNLOAD_SUCCESS=true
                           break
                       fi
                   fi
                   
-                  # 失敗處理：指數退避
-                  echo "❌ [Attempt $i/$MAX_RETRIES] All methods failed."
-                  echo "⏳ Cooling down for ${BACKOFF_TIME} seconds..."
+                  # 失敗後的冷卻
+                  echo "❌ [Attempt $i] Failed. Cooling down ${BACKOFF_TIME}s..."
                   rm -f "$PATCH_FILENAME"
-                  # 如果是最後一次嘗試，就不睡了
                   if [ $i -lt $MAX_RETRIES ]; then
                       sleep $BACKOFF_TIME
                   fi
