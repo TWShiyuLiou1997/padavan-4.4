@@ -123,7 +123,7 @@ jobs:
           # ⚙️ 設定區
           # =======================================================
           # 是否要執行套用 Patch？ (true=套用, false=僅下載收集)
-          APPLY_PATCHES=false
+          APPLY_PATCHES=true
           
           IPT_ROOT="/opt/rt-n56u/trunk/user/iptables/iptables-1.8.7"
           PATCH_DIR="patches_archive"
@@ -306,16 +306,13 @@ jobs:
           }
 
           # -------------------------------------------------------
-          # 1. 寫入 Patch 清單
+          # 2. 寫入 "乾淨版" Patch 清單 (已移除 12 個毒藥 Patch)
           # -------------------------------------------------------
           cat << 'EOL' > patch_list.txt
           2021-03-09|xtables-translate: Fix translation of odd netmasks|https://git.netfilter.org/iptables/patch/?id=46f9d3a9a61ee80fa94b7fa7b3b36045c92606ae
           2021-03-09|libxtables: Simplify xtables_ipmask_to_cidr() a bit|https://git.netfilter.org/iptables/patch/?id=831f57c7fbdc8d79e34b1d7d81ca6f6a8e6bae87
           2021-04-02|extensions: libxt_conntrack: use bitops for state negation|https://git.netfilter.org/iptables/patch/?id=18e334da7363ba186edb1700056e26ded27ca5ba
           2021-04-02|extensions: libxt_conntrack: use bitops for status negation|https://git.netfilter.org/iptables/patch/?id=18d7535d8bce1a13668e9982f53cbd3e56e8c634
-          2021-05-17|xtables: Make invflags 16bit wide|https://git.netfilter.org/iptables/patch/?id=f647f61f273a15ed25307d7ca7a19cefc828c54c
-          2021-05-17|xshared: Eliminate iptables_command_state->invert|https://git.netfilter.org/iptables/patch/?id=3664249f520308e8d9ce6238374f08ac96aedbb6
-          2021-05-17|xshared: Merge invflags handling code|https://git.netfilter.org/iptables/patch/?id=9dc50b5b8e4416219c700331c6e301d840f6e55d
           2021-06-07|libxtables: Fix memleak in xtopt_parse_hostmask()|https://git.netfilter.org/iptables/patch/?id=ffe88f8f01263687e82ef4d3d2bdc0cb5444711e
           2021-06-07|nft: Avoid memleak in error path of nft_cmd_new()|https://git.netfilter.org/iptables/patch/?id=eab75ed36a4f204ddab0c40ba42c5a300634d5c3
           2021-06-07|extensions: libxt_connlimit: add translation|https://git.netfilter.org/iptables/patch/?id=bb01e33d3828d08cd77cc3c9664b2a995ee150cc
@@ -329,19 +326,13 @@ jobs:
           2021-08-31|extensions: libxt_mac: Fix for missing space in listing|https://git.netfilter.org/iptables/patch/?id=cf410aa6604d92faf2a2a5051ec18b7d9482e752
           2021-10-20|xtables-standalone: Drop version number from init errors|https://git.netfilter.org/iptables/patch/?id=0687852da7ed0a7ec8ebc88b41031dcae18c8898
           2021-11-23|extensions: hashlimit: Fix tests with HZ=1000|https://git.netfilter.org/iptables/patch/?id=1eab8e83aec0e6965f11f8cad460add1caeae629
-          2021-11-23|xshared: Share print_header() with legacy iptables|https://git.netfilter.org/iptables/patch/?id=24f30842d979da464c1c3ef106d2efa66a480735
           2021-11-28|extensions: tcpmss: add iptables-translate support|https://git.netfilter.org/iptables/patch/?id=273d88a7744ea5638969ad3252acf518e5ec6cc2
-          2021-12-16|xshared: Share a common printhelp function|https://git.netfilter.org/iptables/patch/?id=56ac0452a4968f1af8d3ad1717c8646593177155
-          2022-01-12|xshared: Store parsed wait and wait_interval in xtables_args|https://git.netfilter.org/iptables/patch/?id=ded7b57977f3fa619975f752a342046225b56935
-          2022-01-12|iptables: Use xtables do_parse() function|https://git.netfilter.org/iptables/patch/?id=9baf3bf0e77dab6ca4b167554ec0e57b65d0af01
           2022-01-18|extensions: libxt_NFLOG: don't truncate log prefix on print/save|https://git.netfilter.org/iptables/patch/?id=62ad29e9b778f4419573c6b43fe7a0a00d783fe6
           2022-01-18|extensions: libxt_NFLOG: fix --nflog-prefix Python test-cases|https://git.netfilter.org/iptables/patch/?id=f0d02998883d2efcb316cd6f524e2f7b3c4d055b
           2022-01-18|extensions: libxt_NFLOG: remove extra space when saving targets with prefixes|https://git.netfilter.org/iptables/patch/?id=05286bab77a6e0f9502e8fb99e1c53ed15663f3f
           2022-02-04|iptables-restore: Support for extra debug output|https://git.netfilter.org/iptables/patch/?id=17ed253f9dd401d7b83b81f5db93411bee592a40
           2022-03-02|libxtables: Register only the highest revision extension|https://git.netfilter.org/iptables/patch/?id=2dbb49d15fb44ddd521a734eca3be3f940b7c1ba
           2022-03-02|Improve error messages for unsupported extensions|https://git.netfilter.org/iptables/patch/?id=17534cb18ed0a5052dc45c117401251359dba6aa
-          2022-03-17|libxtables: Boost rule target checks by announcing chain names|https://git.netfilter.org/iptables/patch/?id=ac4c84cc63d3cc021ca532692885a644fcde4518
-          2022-05-18|treewide: use uint* instead of u_int*|https://git.netfilter.org/iptables/patch/?id=f319389525b066b7dc6d389c88f16a0df3b8f189
           2022-05-25|build: Fix error during out of tree build|https://git.netfilter.org/iptables/patch/?id=0ebf52fc951b2a4d98a166afb34af4f364bbeece
           2022-06-17|iptables.8: mention that iptables exits when setuid|https://git.netfilter.org/iptables/patch/?id=15a31ba8e8e146a5dafce59160b2eeefb00bccca
           2022-07-23|extensions: libxt_conntrack: remove always-false conditionals|https://git.netfilter.org/iptables/patch/?id=e88085ac41b4c962e1d85dcc8dc6fa0d1f80dc12
@@ -356,7 +347,6 @@ jobs:
           2022-12-02|nft: Plug memleak in nft_rule_zero_counters()|https://git.netfilter.org/iptables/patch/?id=aa0c54030300441e9fd66c7016d0090f6736d449
           2022-12-02|iptables-restore: Free handle with --test also|https://git.netfilter.org/iptables/patch/?id=18880dbde615449d00a3e38f3713a19d4566258e
           2022-12-02|iptables: Plug memleaks in print_firewall()|https://git.netfilter.org/iptables/patch/?id=fb63f8b7337aa11a667537e6a3b399062ede2eb5
-          2022-12-02|iptables: Properly clear iptables_command_state object|https://git.netfilter.org/iptables/patch/?id=8bee0db39f7553589c2cec58cc92ed2eafd2eb57
           2022-12-02|libiptc: Eliminate garbage access|https://git.netfilter.org/iptables/patch/?id=39a2aa8cbfc99f4a75dfc0786a80ced90952ab29
           2023-01-12|extensions: NAT: Fix for -Werror=format-security|https://git.netfilter.org/iptables/patch/?id=ed4082a7405a5838c205a34c1559e289949200cc
           2023-01-31|Proper fix for unknown argument error message|https://git.netfilter.org/iptables/patch/?id=d6eb6a9fd3878ce4fa01f8d4127f1735988bd07b
@@ -374,14 +364,12 @@ jobs:
           2023-11-29|libxtables: xtoptions: Fix for garbage access in xtables_options_xfrm()|https://git.netfilter.org/iptables/patch/?id=584569727dc0fc52f401db628059807030138a99
           2023-11-29|libxtables: xtoptions: Fix for non-CIDR-compatible hostmasks|https://git.netfilter.org/iptables/patch/?id=41139aee5e53304182a25f1e573f034b313f7232
           2023-12-15|build: replace echo -e with printf|https://git.netfilter.org/iptables/patch/?id=f5cf76626d95d2c491a80288bccc160c53b44e88
-          2023-12-21|iptables-legacy: Fix for mandatory lock waiting|https://git.netfilter.org/iptables/patch/?id=63ab5b8906f6913a14d38ec231f21daa760339a9
           2024-01-10|extensions: libxt_limit: Use guided option parser for NFPROTO_BRIDGE, too|https://git.netfilter.org/iptables/patch/?id=84915856a892ca316ecf427cb17f8344a999083b
           2024-01-10|extensions: libxt_HMARK: Review HMARK_parse()|https://git.netfilter.org/iptables/patch/?id=f4721951baca81b7d74c5551d0f5c599dbb89bf1
           2024-01-24|iptables: Add missing error codes|https://git.netfilter.org/iptables/patch/?id=0a118c474924f05224b215cf38b7b3a19a9f0265
           2024-02-01|libxtables: Fix memleak of matches udata|https://git.netfilter.org/iptables/patch/?id=e7366db80740d34d2fe4ba8d12ef86a423e66280
           2024-02-01|xshared: Fix for memleak in option merging with ebtables|https://git.netfilter.org/iptables/patch/?id=933e605154c439218f73f48b028abbeed336c3c5
           2024-02-01|ebtables: Fix for memleak with change counters command|https://git.netfilter.org/iptables/patch/?id=11c77ed471f2d8a6dc60c17aef1e1a3b52ff3591
-          2024-02-01|xshared: Introduce xtables_clear_args()|https://git.netfilter.org/iptables/patch/?id=d109e41344b8f54741c0862a44d544a713178dd3
           2024-02-02|libxtables: xtoptions: Respect min/max values when completing ranges|https://git.netfilter.org/iptables/patch/?id=a392cf0e9b11b01352d02e81fbd5ad4da49bce94
           2024-02-02|libxtables: Reject negative port ranges|https://git.netfilter.org/iptables/patch/?id=9d41421a887f4bc4b3ba10174cf43ee2c6b76956
           2024-02-02|libxtables: xtoptions: Assert ranges are monotonic increasing|https://git.netfilter.org/iptables/patch/?id=30a7f11234a81bd2389c7e7224769b1fdd192239
