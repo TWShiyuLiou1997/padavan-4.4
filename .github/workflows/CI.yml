@@ -145,7 +145,7 @@ jobs:
           touch "$LOG_FILE"
 
           # =======================================================
-          # 🛠️ 定義核心函數 (極致偽裝 + 智能三步曲下載)
+          # 🛠️ 定義核心函數 (極致偽裝 + Curl 優先策略)
           # =======================================================
           download_and_process() {
               local DATE=$1
@@ -160,9 +160,7 @@ jobs:
               echo "---------------------------------------------------"
               echo "Processing Patch #$COUNT: $RAW_NAME"
               
-              # ---------------------------------------------------
               # 定義極致偽裝 Headers (Chrome 144 / Windows 10)
-              # ---------------------------------------------------
               local UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
               # 注意：Header 值中的引號需要小心處理
               local H_SEC_CH_UA='"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"'
@@ -176,52 +174,11 @@ jobs:
               sleep $(shuf -i 1-3 -n 1)
 
               # ---------------------------------------------------
-              # 下載策略 (三步曲：Wget HTTPS -> Wget HTTP -> Curl HTTPS)
+              # 下載策略 (新順序：Curl HTTPS -> Wget HTTPS -> Wget HTTP)
               # ---------------------------------------------------
               
-              # 1. Wget HTTPS (最優先，快速，帶偽裝 Header)
+              # 1. Curl HTTPS (最強偽裝，優先使用)
               if [ "$DOWNLOAD_SUCCESS" = false ]; then
-                  if wget --no-check-certificate -q \
-                       --user-agent="$UA" \
-                       --header="Accept: $ACCEPT" \
-                       --header="Referer: $REFERER" \
-                       --header="sec-ch-ua: $H_SEC_CH_UA" \
-                       --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                       -O "$PATCH_FILENAME" "$URL"; then
-                       
-                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Mode 1] Wget HTTPS Success"
-                          DOWNLOAD_SUCCESS=true
-                      fi
-                  fi
-              fi
-              
-              # 2. Wget HTTP (降級嘗試，有些防火牆對 HTTP 較寬鬆)
-              if [ "$DOWNLOAD_SUCCESS" = false ]; then
-                  echo "⚠️ HTTPS failed, trying HTTP..."
-                  rm -f "$PATCH_FILENAME" # 清理前一次失敗的檔案
-                  local HTTP_URL=$(echo "$URL" | sed 's/^https:/http:/')
-                  
-                  if wget --no-check-certificate -q \
-                       --user-agent="$UA" \
-                       --header="Accept: $ACCEPT" \
-                       --header="Referer: $REFERER" \
-                       --header="sec-ch-ua: $H_SEC_CH_UA" \
-                       --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                       -O "$PATCH_FILENAME" "$HTTP_URL"; then
-                       
-                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Mode 2] Wget HTTP Success"
-                          DOWNLOAD_SUCCESS=true
-                      fi
-                  fi
-              fi
-              
-              # 3. Curl HTTPS (最強偽裝，最後手段)
-              if [ "$DOWNLOAD_SUCCESS" = false ]; then
-                  echo "⚠️ Wget failed, switching to Curl..."
-                  rm -f "$PATCH_FILENAME"
-                  
                   # 使用最完整的 Curl 參數
                   if curl -k -L -s \
                        -H "User-Agent: $UA" \
@@ -240,7 +197,48 @@ jobs:
                        -o "$PATCH_FILENAME" "$URL"; then
                        
                       if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Mode 3] Curl HTTPS Success"
+                          echo "✅ [Mode 1] Curl HTTPS Success"
+                          DOWNLOAD_SUCCESS=true
+                      fi
+                  fi
+              fi
+              
+              # 2. Wget HTTPS (第一備援)
+              if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                  echo "⚠️ Curl failed, switching to Wget HTTPS..."
+                  rm -f "$PATCH_FILENAME"
+                  
+                  if wget --no-check-certificate -q \
+                       --user-agent="$UA" \
+                       --header="Accept: $ACCEPT" \
+                       --header="Referer: $REFERER" \
+                       --header="sec-ch-ua: $H_SEC_CH_UA" \
+                       --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
+                       -O "$PATCH_FILENAME" "$URL"; then
+                       
+                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
+                          echo "✅ [Mode 2] Wget HTTPS Success"
+                          DOWNLOAD_SUCCESS=true
+                      fi
+                  fi
+              fi
+              
+              # 3. Wget HTTP (最終降級手段)
+              if [ "$DOWNLOAD_SUCCESS" = false ]; then
+                  echo "⚠️ HTTPS failed, trying HTTP..."
+                  rm -f "$PATCH_FILENAME"
+                  local HTTP_URL=$(echo "$URL" | sed 's/^https:/http:/')
+                  
+                  if wget --no-check-certificate -q \
+                       --user-agent="$UA" \
+                       --header="Accept: $ACCEPT" \
+                       --header="Referer: $REFERER" \
+                       --header="sec-ch-ua: $H_SEC_CH_UA" \
+                       --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
+                       -O "$PATCH_FILENAME" "$HTTP_URL"; then
+                       
+                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
+                          echo "✅ [Mode 3] Wget HTTP Success"
                           DOWNLOAD_SUCCESS=true
                       fi
                   fi
