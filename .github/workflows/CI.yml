@@ -306,8 +306,8 @@ jobs:
           }
 
           # -------------------------------------------------------
-          # 2. 寫入 "乾淨版" Patch 清單 (Final Clean List)
-          # 已移除: xshared重構, xlate翻譯, ICMP解析重構
+          # 2. 寫入 "乾淨版" Patch 清單 (Final Clean List - 53 Patches)
+          # 已移除: xshared重構, xlate翻譯, ICMP解析, IPv6計數器(-c)
           # -------------------------------------------------------
           cat << 'EOL' > patch_list.txt
           2021-03-09|libxtables: Simplify xtables_ipmask_to_cidr() a bit|https://git.netfilter.org/iptables/patch/?id=831f57c7fbdc8d79e34b1d7d81ca6f6a8e6bae87
@@ -339,7 +339,6 @@ jobs:
           2022-12-02|libiptc: Eliminate garbage access|https://git.netfilter.org/iptables/patch/?id=39a2aa8cbfc99f4a75dfc0786a80ced90952ab29
           2023-01-31|Proper fix for unknown argument error message|https://git.netfilter.org/iptables/patch/?id=d6eb6a9fd3878ce4fa01f8d4127f1735988bd07b
           2023-06-21|iptables: Fix handling of non-existent chains|https://git.netfilter.org/iptables/patch/?id=82ccfb488eeac5507471099b9b4e6d136cc06e3b
-          2023-06-21|iptables: Fix setting of ipv6 counters|https://git.netfilter.org/iptables/patch/?id=ed839159edf8bda8e9196f1056c4038c22d78bfd
           2023-08-01|iptables-restore: Drop dead code|https://git.netfilter.org/iptables/patch/?id=4d9453233538200e9663c6bd0c2df09e1671b5f4
           2023-08-01|iptables-apply: Eliminate shellcheck warnings|https://git.netfilter.org/iptables/patch/?id=9f98550d58a49fc95d529ebdc0173579d957b425
           2023-08-04|extensions: libipt_icmp: Fix confusion between 255/255 and any|https://git.netfilter.org/iptables/patch/?id=5b5430d627bbc227a2d51d4312c371f2015834c6
