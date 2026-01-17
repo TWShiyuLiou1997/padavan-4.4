@@ -79,6 +79,96 @@ jobs:
           git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-4.4.git /opt/rt-n56u
 
       # =======================================================
+      # [完全搬運版] BusyBox 1.37.0 (Sync from padavan-ng)
+      # =======================================================
+      - name: 🔥 Sync BusyBox from padavan-ng
+        run: |
+          echo "::group::Sync BusyBox 1.37.0"
+          
+          # 定義路徑
+          BASE_DIR="/opt/rt-n56u/trunk/user"
+          TARGET_DIR="$BASE_DIR/busybox"
+          
+          # 1. 清理舊目錄 (原本是 1.24.x)
+          echo "🗑️ Removing old busybox directory..."
+          rm -rf "$TARGET_DIR"
+          
+          # 2. 透過臨時目錄 Clone padavan-ng
+          # (如果之前步驟已經 clone 過，這裡可以檢查並重用，或是重新 clone)
+          if [ ! -d "/tmp/padavan-ng" ]; then
+              echo "⬇️ Cloning padavan-ng repo..."
+              git clone --depth=1 https://github.com/TWShiyuLiou1997/padavan-ng.git /tmp/padavan-ng
+          else
+              echo "ℹ️ Repo already cloned, syncing..."
+              cd /tmp/padavan-ng && git pull
+          fi
+          
+          # 3. 搬運 busybox 目錄
+          echo "🚚 Syncing busybox folder..."
+          if [ -d "/tmp/padavan-ng/trunk/user/busybox" ]; then
+              cp -rf /tmp/padavan-ng/trunk/user/busybox "$TARGET_DIR"
+              echo "✅ 成功從 padavan-ng 同步 busybox 目錄"
+          else
+              echo "❌ Error: 來源 Repo 中找不到 busybox 目錄"
+              exit 1
+          fi
+          
+          # 4. 進入目錄準備編譯環境
+          cd "$TARGET_DIR"
+          
+          # 5. 驗證 Makefile 是否正確 (確認是否為 1.37.0)
+          if grep -q "SRC_NAME=busybox-1.37.0" Makefile; then
+              echo "✅ 版本確認: 1.37.0 (Makefile 驗證通過)"
+              
+              # [關鍵步驟] 執行 Makefile 內的下載與解壓規則
+              # 新版 Makefile 定義了 download_test 和 extract_test
+              # 我們必須手動觸發它們，否則編譯時會因為沒有源碼而失敗
+              
+              echo "⬇️ Running make download_test..."
+              make download_test || { echo "❌ Download failed"; exit 1; }
+              
+              echo "📦 Running make extract_test..."
+              # 注意：新版 Makefile 的 extract_test 包含了 patch 應用邏輯
+              make extract_test || { echo "❌ Extract/Patch failed"; exit 1; }
+              
+              # 再次確認解壓結果
+              if [ -d "busybox-1.37.0" ]; then
+                  echo "✅ 源碼已就緒 (busybox-1.37.0)"
+              else
+                  echo "❌ 源碼解壓失敗，請檢查網路或 Makefile 設定"
+                  exit 1
+              fi
+          else
+              echo "⚠️ 警告：同步過來的 Makefile 版本似乎不是 1.37.0，請檢查！"
+              cat Makefile | grep SRC_NAME
+              # 這裡不 exit，讓流程嘗試繼續，或許只是版本號變數不同
+          fi
+          
+          # 6. 全局依賴修復
+          # 舊版路徑通常是 busybox-1.24.x，新版是 busybox-1.37.0
+          # 我們需要掃描 trunk/user 下所有 Makefile，把舊版路徑替換掉
+          echo "🔍 修復依賴舊版 (busybox-1.24.x) 的其他組件..."
+          
+          # 定義舊版字串 (根據你提供的資訊)
+          OLD_VER_STR="busybox-1.24.x"
+          NEW_VER_STR="busybox-1.37.0"
+          
+          # 搜尋並替換
+          grep -rl "$OLD_VER_STR" "$BASE_DIR" | while read -r file ; do
+              echo "  - Patching dependency in: $file"
+              sed -i "s/$OLD_VER_STR/$NEW_VER_STR/g" "$file"
+          done
+          
+          # 額外檢查：有些地方可能寫死 busybox-1.24.2
+          grep -rl "busybox-1.24.2" "$BASE_DIR" | while read -r file ; do
+              echo "  - Patching specific version dependency in: $file"
+              sed -i "s/busybox-1.24.2/$NEW_VER_STR/g" "$file"
+          done
+          
+          echo "🎉 BusyBox 同步與環境修復完成！"
+          echo "::endgroup::"
+      
+      # =======================================================
       # [完全搬運版] 直接從 Repo 下載 libmnl 覆蓋
       # =======================================================
       - name: 🔥 Sync libmnl from padavan-ng repo
