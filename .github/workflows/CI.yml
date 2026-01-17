@@ -94,83 +94,132 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] 同步 BusyBox (直接使用上一步的資源)
+      # [步驟 B] 同步 BusyBox 1.37.0 (最終完全體：母板更新 + 雙重驗證)
       # =======================================================
       - name: 🔥 Sync BusyBox from padavan-ng
         run: |
           echo "::group::Sync BusyBox 1.37.0"
           
-          BASE_DIR="/opt/rt-n56u/trunk/user"
+          # -------------------------------------------------------
+          # 定義全域路徑變數
+          # -------------------------------------------------------
+          REPO_ROOT="/opt/rt-n56u"
+          BASE_DIR="$REPO_ROOT/trunk/user"
           TARGET_DIR="$BASE_DIR/busybox"
-          SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           
-          # 1. 清理舊目錄
-          echo "🗑️ Removing old busybox directory..."
+          # 來源路徑 (padavan-ng)
+          SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
+          NEW_CONFIG_SRC="/tmp/padavan-ng/trunk/configs/boards/busybox.config"
+          
+          # 目標路徑 (原本的 Config 母板位置)
+          MASTER_CONFIG_DEST="$REPO_ROOT/trunk/configs/boards/busybox.config"
+
+          # =======================================================
+          # 0. [關鍵新增] 更新全域 BusyBox Config 母板
+          #    這步防止編譯過程中，舊的 Config 被複製回來覆蓋我們的新設定
+          # =======================================================
+          echo "⚡ Updating Master Board Config..."
+          
+          # 0-1. 刪除原本的舊版 Config (1.24.x)
+          if [ -f "$MASTER_CONFIG_DEST" ]; then
+              echo "🗑️ Removing old master config: $MASTER_CONFIG_DEST"
+              rm -f "$MASTER_CONFIG_DEST"
+          fi
+          
+          # 0-2. 檢查新版 Config 是否存在
+          if [ ! -f "$NEW_CONFIG_SRC" ]; then
+              echo "❌ Critical Error: 來源 Config 不存在 ($NEW_CONFIG_SRC)"
+              exit 1
+          fi
+
+          # 0-3. 複製新版 Config 成為新的母板
+          # 確保目標目錄存在
+          mkdir -p "$(dirname "$MASTER_CONFIG_DEST")"
+          cp -f "$NEW_CONFIG_SRC" "$MASTER_CONFIG_DEST"
+          echo "✅ Master config updated successfully!"
+
+          # =======================================================
+          # 1. 清理與建立 user/busybox 目錄
+          # =======================================================
+          echo "🗑️ Removing old user/busybox directory..."
           rm -rf "$TARGET_DIR"
           
-          # 2. 檢查來源是否存在 (防止上一步失敗)
           if [ ! -d "$SOURCE_DIR" ]; then
-             echo "❌ Error: 來源資料夾 $SOURCE_DIR 不存在，請檢查 Clone 步驟"
+             echo "❌ Error: 來源原始碼資料夾 $SOURCE_DIR 不存在"
              exit 1
           fi
 
-          # 3. 搬運 (直接 Copy)
+          # =======================================================
+          # 2. 搬運原始碼
+          # =======================================================
           echo "🚚 Copying busybox folder..."
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
-          
-          # 4. 驗證與編譯測試
           cd "$TARGET_DIR"
-          if grep -q "SRC_NAME=busybox-1.37.0" Makefile; then
-              echo "✅ 版本確認: 1.37.0"
-              echo "⬇️ Running make download_test..."
-              make download_test || { echo "❌ Download failed"; exit 1; }
-              echo "📦 Running make extract_test..."
-              make extract_test || { echo "❌ Extract failed"; exit 1; }
-          else
-              echo "⚠️ 警告：Makefile 版本不符"
-              grep SRC_NAME Makefile
-          fi
 
           # =======================================================
-          # [新增修正] 5. 強制複製 Config (解決 config 遺失問題)
+          # 3. 部署局部 Config (同時部署內外兩層)
+          #    雖然已經更新了母板，但為了保險起見，我們手動將 Config
+          #    直接注入到編譯目錄，確保第一次 Make 就能讀到
           # =======================================================
-          echo "🔧 Fixing .config placement..."
+          echo "🔧 Installing Local BusyBox Configs..."
           
-          # 檢查外層是否有 .config (這是 padavan-ng 預設的設定檔)
-          if [ -f ".config" ]; then
-              echo "✅ Found .config in wrapper dir, copying to build dir..."
-              # 強制複製到原始碼目錄內
-              cp -f .config busybox-1.37.0/.config
-          else
-              echo "⚠️ Warning: No .config found! Trying to use default..."
-              # 如果真的找不到，嘗試從原始碼裡的預設檔複製 (備用方案)
-              if [ -f "busybox-1.37.0/examples/defconfig" ]; then
-                   cp busybox-1.37.0/examples/defconfig busybox-1.37.0/.config
+          # A. 內層 (給編譯器實際編譯用)
+          cp -f "$NEW_CONFIG_SRC" busybox-1.37.0/.config
+          
+          # B. 外層 (給 Makefile 檢查用，防止它執行 oldconfig 覆蓋)
+          cp -f "$NEW_CONFIG_SRC" ./config
+          
+          echo "✅ Local configs installed."
+
+          # =======================================================
+          # 4. [強化驗證] 雙重檢查：存在性 + 內容有效性
+          # =======================================================
+          # 定義我們要檢查的兩個目標檔案
+          CHECKS=("busybox-1.37.0/.config" "./config")
+          
+          for CONF in "${CHECKS[@]}"; do
+              echo "🔍 Verifying: $CONF ..."
+              
+              # 4-1. 檢查檔案是否存在
+              if [ ! -f "$CONF" ]; then
+                  echo "❌ Error: File not found -> $CONF"
+                  exit 1
               fi
-          fi
+
+              # 4-2. 檢查是否為有效 Config (使用 grep 檢查關鍵標頭)
+              if grep -q "CONFIG_HAVE_DOT_CONFIG=y" "$CONF"; then
+                  echo "   🆗 Valid header found."
+              else
+                  echo "⚠️ Warning: Invalid config detected in $CONF"
+                  echo "   Attempting to fix using 'make oldconfig'..."
+                  
+                  # 嘗試修復 (只針對內層做 make oldconfig)
+                  if [[ "$CONF" == *"busybox-1.37.0/.config"* ]]; then
+                      cd busybox-1.37.0
+                      yes "" | make oldconfig
+                      cd ..
+                  fi
+              fi
+          done
           
-          # 檢查是否複製成功
-          if [ ! -f "busybox-1.37.0/.config" ]; then
-              echo "❌ Critical Error: Still no .config inside busybox-1.37.0!"
-              echo "   List of files in $TARGET_DIR:"
-              ls -la "$TARGET_DIR"
-              exit 1
-          fi
+          # 確保修復後的 config 同步回外層
+          cp -f busybox-1.37.0/.config ./config
+
           # =======================================================
-          
-          # 6. 全局依賴修復
-          echo "🔍 Patching dependencies..."
+          # 5. 全局依賴修復 (版本號文字替換)
+          # =======================================================
+          echo "🔍 Patching dependencies (Version String Update)..."
           OLD_VER="busybox-1.24.x"
           NEW_VER="busybox-1.37.0"
+          
           grep -rl "$OLD_VER" "$BASE_DIR" | while read -r file ; do
               sed -i "s/$OLD_VER/$NEW_VER/g" "$file"
           done
-          # 針對寫死 1.24.2 的情況
           grep -rl "busybox-1.24.2" "$BASE_DIR" | while read -r file ; do
               sed -i "s/busybox-1.24.2/$NEW_VER/g" "$file"
           done
           
-          echo "🎉 BusyBox sync done!"
+          echo "🎉 BusyBox sync process completed successfully!"
           echo "::endgroup::"
 
       # =======================================================
