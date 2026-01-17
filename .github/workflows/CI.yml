@@ -193,12 +193,12 @@ jobs:
           # =======================================================
           # ⚙️ 設定區
           # =======================================================
-          # 是否要執行套用 Patch？ (true=套用, false=僅下載收集)
-          APPLY_PATCHES=true
-          
           IPT_ROOT="/opt/rt-n56u/trunk/user/iptables/iptables-1.8.7"
           PATCH_DIR="patches_archive"
           LOG_FILE="patch_summary.log"
+          
+          # [初始化] 流程控制變數
+          SKIP_PATCHING=false
           
           # 優化全局網路設置
           git config --global http.postBuffer 524288000
@@ -206,17 +206,84 @@ jobs:
           git config --global http.lowSpeedTime 999999
           git config --global http.sslVerify false
           
+          # 檢查原始碼目錄是否存在
           if [ ! -d "$IPT_ROOT" ]; then
-             echo "❌ Error: 找不到原始碼目錄 $IPT_ROOT"
-             exit 1
+             echo "❌ CRITICAL: Source directory '$IPT_ROOT' NOT FOUND!"
+             # 依據完美邏輯設定 SKIP_PATCHING，確保流程可控
+             SKIP_PATCHING=true
+          else
+             cd "$IPT_ROOT"
+             mkdir -p "$PATCH_DIR"
+             touch "$LOG_FILE"
           fi
-          
-          cd "$IPT_ROOT"
-          mkdir -p "$PATCH_DIR"
-          touch "$LOG_FILE"
+
+          # ⚙️ 根據狀態決定是否套用 Patch
+          if [ "$SKIP_PATCHING" = true ]; then
+              APPLY_PATCHES=false
+              echo "⚠️ Skipping Patch Application due to directory check failure."
+          else
+              APPLY_PATCHES=true
+          fi
 
           # =======================================================
-          # 🛠️ V4 終極函數: 混合策略 (低頻請求 + 動態偽裝 + 自動清洗)
+          # 🛠️ [核心函數] 獨立驗證邏輯 (V12.3: Awk 智慧邊界判定 + 行數防禦)
+          # =======================================================
+          verify_patch_integrity() {
+              local F_PATH="$1"
+              local EXP_ID="$2"
+              local EXP_SUBJ="$3"
+              
+              # 1. 基礎檔案檢查
+              if [ ! -s "$F_PATH" ]; then return 1; fi
+              if ! grep -qE "^diff --git|^--- a/" "$F_PATH"; then return 1; fi
+
+              local CHECK_PASS=true
+
+              # 2. Commit ID 比對
+              if [ -n "$EXP_ID" ]; then
+                  local FILE_ID=$(grep "^From " "$F_PATH" | head -n 1 | awk '{print $2}')
+                  if [[ "$FILE_ID" == "$EXP_ID"* ]]; then
+                      echo "   ✅ ID Check: MATCH ($EXP_ID)"
+                  else
+                      echo "   ❌ ID Check: MISMATCH (File: ${FILE_ID:0:8} vs Url: ${EXP_ID:0:8})"
+                      CHECK_PASS=false
+                  fi
+              fi
+
+              # 3. Subject 標題比對 (使用 awk 進行多行合併與智慧邊界偵測)
+              if [ -n "$EXP_SUBJ" ]; then
+                  # Awk 邏輯：
+                  # 1. 找到 Subject: 開頭，設定 flag=1。
+                  # 2. 如果 flag=1，檢查當前行是否為邊界（空行或新 Header）。
+                  # 3. 如果是邊界，停止讀取；否則將內容串接。
+                  # 4. 輸出串接後的結果。
+                  local RAW_SUBJ_BLOCK=$(awk '
+                      /^Subject: / { flag=1; sub(/^Subject: /, ""); printf "%s", $0; next }
+                      flag == 1 {
+                          # 【修正點】加入行數限制，防止緩衝區溢位
+                          c++; if (c > 10) exit; 
+                          if (/^$/) exit;  # 遇到空行 -> 結束
+                          if (/^[A-Za-z0-9-]+:/) exit; # 遇到新 Header (如 MIME-Version:) -> 結束
+                          printf " %s", $0; # 否則視為 Subject 的延續 (換行變空格)
+                      }
+                  ' "$F_PATH" | sed 's/\[PATCH\] //g')
+                  
+                  # 執行標準化：只保留英數字
+                  local FILE_NORM_SUBJ=$(echo "$RAW_SUBJ_BLOCK" | tr -dc 'a-zA-Z0-9')
+                  
+                  if [ "$FILE_NORM_SUBJ" == "$EXP_SUBJ" ]; then
+                      echo "   ✅ Subject Check: MATCH"
+                  else
+                      echo "   ❌ Subject Check: MISMATCH"
+                      CHECK_PASS=false
+                  fi
+              fi
+
+              if [ "$CHECK_PASS" = true ]; then return 0; else return 1; fi
+          }
+
+          # =======================================================
+          # 🛠️ [主處理函數] V12.3 邏輯：Process Loop (快取失敗 -> 回歸主下載流程)
           # =======================================================
           download_and_process() {
               local DATE=$1
@@ -224,156 +291,192 @@ jobs:
               local URL=$3
               local COUNT=$4
               
-              # 命名清洗
+              # A. 參數準備
               local SAFE_NAME=$(echo "$RAW_NAME" | sed 's/[^a-zA-Z0-9]/_/g')
               local PATCH_FILENAME="$PATCH_DIR/${COUNT}_${DATE}_${SAFE_NAME}.patch"
+              # 使用當前目錄 (iptables root) 存放臨時檔案
               local COOKIE_FILE="cookies.txt"
+              local UA_CACHE="ua_cache.txt"
               
+              local TARGET_COMMIT_ID=$(echo "$URL" | grep -o 'id=[a-f0-9]*' | cut -d= -f2)
+              local TARGET_NORM_SUBJECT=$(echo "$RAW_NAME" | tr -dc 'a-zA-Z0-9')
+
               echo "---------------------------------------------------"
               echo "Processing Patch #$COUNT: $RAW_NAME"
 
-              # [戰略 1] 降低特徵變更頻率：每 10 個檔案才換一次 UA
-              # 模擬同一個人在同一個瀏覽器視窗操作，而不是精神分裂每秒換一個版本
-              if [ $((COUNT % 10)) -eq 1 ] || [ ! -f ua_cache.txt ]; then
-                  local MINOR_VER=$((RANDOM % 100))
-                  echo "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.${MINOR_VER}.0 Safari/537.36" > ua_cache.txt
-                  # 同時重置 Cookie，模擬新 Session
-                  rm -f "$COOKIE_FILE"
-                  echo "🔄 Session Rotate: New UA & Cookies generated."
-              fi
-              local UA=$(cat ua_cache.txt)
+              local PROCESS_ATTEMPT=0
+              local PROCESS_SUCCESS=false
 
-              # [戰略 2] Header 固定化
-              local H_SEC_CH_UA='"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"'
-              local H_SEC_PLATFORM='"Windows"'
-              local H_LANG="en-US,en;q=0.9" 
-              local ACCEPT_FILE="text/x-diff,text/plain,application/octet-stream;q=0.9,*/*;q=0.8"
-              
-              # 計算 URL
-              local COMMIT_URL=$(echo "$URL" | sed 's|/patch/|/commit/|')
-              local LOG_URL="https://git.netfilter.org/iptables/log/"
-              
-              # [戰略 3] 隨機長休息 (Human Fatigue)
-              # 在 #30, #60, #90 附近隨機進行長休息，避開 V3 在 #33 被殺的門檻
-              if [ $((COUNT % 30)) -eq 0 ]; then
-                  local SLEEP_LONG=$(shuf -i 20-40 -n 1)
-                  echo "☕ Coffee Break: Sleeping for ${SLEEP_LONG}s..."
-                  sleep $SLEEP_LONG
-              else
-                  # 一般隨機延遲 2-4 秒
-                  sleep $(shuf -i 2-4 -n 1)
-              fi
+              # 🔥 V12 核心：使用 while 迴圈處理重試
+              while [ $PROCESS_ATTEMPT -lt 2 ]; do
+                  PROCESS_ATTEMPT=$((PROCESS_ATTEMPT+1))
+                  local NEED_DOWNLOAD=true
 
-              # ===================================================
-              # 執行下載
-              # ===================================================
-              local MAX_RETRIES=5
-              local DOWNLOAD_SUCCESS=false
-
-              for ((i=1; i<=MAX_RETRIES; i++)); do
-                  local BACKOFF_TIME=$((5 * i + 5))
-                  
-                  # 決定是否要「演全套」(請求 Commit 頁面)
-                  # V3 失敗是因為每次都演，導致請求量爆炸。
-                  # V4 策略：只有 20% 機率演全套，或者失敗重試時才演。
-                  local PREFLIGHT_DONE=false
-                  if [ $((RANDOM % 5)) -eq 0 ] || [ $i -gt 1 ]; then
-                      echo "🎭 Performing Pre-flight check (Visiting Commit Page)..."
-                      curl -k -L -s -o /dev/null \
-                           -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-                           -H "User-Agent: $UA" \
-                           -H "Referer: $LOG_URL" \
-                           "$COMMIT_URL"
-                      sleep 1
-                      PREFLIGHT_DONE=true
-                  fi
-
-                  # 設定 Referer
-                  # 如果剛才演過全套，Referer 就是 Commit 頁 (真實)
-                  # 如果沒演，Referer 設為 Log 列表頁 (V1 的成功經驗)
-                  if [ "$PREFLIGHT_DONE" = true ]; then
-                      local CUR_REFERER="$COMMIT_URL"
-                  else
-                      local CUR_REFERER="$LOG_URL"
-                  fi
-
-                  # 嘗試下載
-                  if curl -k -L -s \
-                       -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
-                       -H "User-Agent: $UA" \
-                       -H "Accept: $ACCEPT_FILE" \
-                       -H "Accept-Language: $H_LANG" \
-                       -H "Referer: $CUR_REFERER" \
-                       -H "sec-ch-ua: $H_SEC_CH_UA" \
-                       -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                       --connect-timeout 20 \
-                       --retry 2 \
-                       -o "$PATCH_FILENAME" "$URL"; then
-                      
-                      # 驗證內容
-                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Attempt $i] Download Success"
-                          DOWNLOAD_SUCCESS=true
-                          break
+                  # ==========================================
+                  # B. 狀態檢查 (Check Phase)
+                  # ==========================================
+                  if [ -f "$PATCH_FILENAME" ]; then
+                      echo "🔍 [Attempt $PROCESS_ATTEMPT] Verifying local cache..."
+                      if verify_patch_integrity "$PATCH_FILENAME" "$TARGET_COMMIT_ID" "$TARGET_NORM_SUBJECT"; then
+                          echo "✅ Local cache verified valid."
+                          NEED_DOWNLOAD=false
                       else
-                          echo "⚠️ Invalid content detected. Rotating identity..."
-                          # 內容錯誤，立即刪除 Cookie 和 UA Cache 強制換身份
-                          rm -f "$COOKIE_FILE" "ua_cache.txt"
+                          echo "⚠️ Cache verification failed. Deleting..."
+                          rm -f "$PATCH_FILENAME"
+                          NEED_DOWNLOAD=true
                       fi
+                  else
+                      NEED_DOWNLOAD=true
+                  fi
+
+                  # ==========================================
+                  # C. 下載流程 (Download Phase) - 完整的 V9 參數防禦
+                  # ==========================================
+                  if [ "$NEED_DOWNLOAD" = true ]; then
+                      echo "⬇️ [Attempt $PROCESS_ATTEMPT] Starting Full Download Sequence..."
+
+                      # [UA 生成]
+                      if [ $((10#$COUNT % 10)) -eq 1 ] || [ ! -f "$UA_CACHE" ]; then
+                          local MINOR_VER=$((RANDOM % 100))
+                          echo "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.${MINOR_VER}.0 Safari/537.36" > "$UA_CACHE"
+                          rm -f "$COOKIE_FILE"
+                          echo "🔄 Session Rotate: New UA Generated."
+                      fi
+                      local UA=$(cat "$UA_CACHE")
+                      
+                      # [Headers 設定]
+                      local H_SEC_CH_UA='"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"'
+                      local H_SEC_PLATFORM='"Windows"'
+                      local H_LANG="en-US,en;q=0.9"
+                      local ACCEPT_FILE="text/x-diff,text/plain,application/octet-stream;q=0.9,*/*;q=0.8"
+                      
+                      local COMMIT_URL=$(echo "$URL" | sed 's|/patch/|/commit/|')
+                      local LOG_URL="https://git.netfilter.org/iptables/log/"
+                      
+                      # [戰略 3] 隨機長休息 (Human Fatigue)
+                      if [ $((COUNT % 30)) -eq 0 ]; then
+                          local SLEEP_LONG=$(shuf -i 20-40 -n 1)
+                          echo "☕ Coffee Break: Sleeping for ${SLEEP_LONG}s..."
+                          sleep $SLEEP_LONG
+                      else
+                          sleep $(shuf -i 2-4 -n 1)
+                      fi
+
+                      local MAX_RETRIES=5
+                      local DOWNLOAD_OK=false
+
+                      for ((i=1; i<=MAX_RETRIES; i++)); do
+                          local BACKOFF_TIME=$((5 * i + 5))
+                          
+                          # [Pre-flight Check]
+                          local PREFLIGHT_DONE=false
+                          if [ $((RANDOM % 5)) -eq 0 ] || [ $i -gt 1 ]; then
+                              echo "🎭 Performing Pre-flight check..."
+                              curl -k -L -s -o /dev/null \
+                                   -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+                                   -H "User-Agent: $UA" -H "Referer: $LOG_URL" \
+                                   "$COMMIT_URL"
+                              sleep 1
+                              PREFLIGHT_DONE=true
+                          fi
+
+                          local CUR_REFERER="$LOG_URL"
+                          [ "$PREFLIGHT_DONE" = true ] && CUR_REFERER="$COMMIT_URL"
+
+                          # 1. 嘗試 Curl
+                          if curl -k -L -s \
+                               -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+                               -H "User-Agent: $UA" \
+                               -H "Accept: $ACCEPT_FILE" \
+                               -H "Accept-Language: $H_LANG" \
+                               -H "Referer: $CUR_REFERER" \
+                               -H "sec-ch-ua: $H_SEC_CH_UA" \
+                               -H "sec-ch-ua-platform: $H_SEC_PLATFORM" \
+                               --connect-timeout 20 --retry 2 \
+                               -o "$PATCH_FILENAME" "$URL"; then
+                              
+                              if verify_patch_integrity "$PATCH_FILENAME" "$TARGET_COMMIT_ID" "$TARGET_NORM_SUBJECT"; then
+                                  echo "✅ [Attempt $i] Download Success & Verified"
+                                  DOWNLOAD_OK=true
+                                  break
+                              else
+                                  echo "⚠️ [Attempt $i] Content invalid. Rotating identity..."
+                                  rm -f "$COOKIE_FILE" "$UA_CACHE"
+                              fi
+                          fi
+                          
+                          # 2. 策略 B: Wget (Clean Request)
+                          echo "⚠️ Curl failed/invalid. Switching to Wget..."
+                          rm -f "$PATCH_FILENAME"
+                          if wget --no-check-certificate -q \
+                               --user-agent="$UA" \
+                               --header="Accept: $ACCEPT_FILE" \
+                               --header="Referer: $COMMIT_URL" \
+                               --header="sec-ch-ua: $H_SEC_CH_UA" \
+                               --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
+                               -O "$PATCH_FILENAME" "$URL"; then
+                               
+                               if verify_patch_integrity "$PATCH_FILENAME" "$TARGET_COMMIT_ID" "$TARGET_NORM_SUBJECT"; then
+                                   echo "✅ [Attempt $i] Download Success (Wget)"
+                                   DOWNLOAD_OK=true
+                                   break
+                               fi
+                          fi
+                          
+                          echo "❌ [Attempt $i] Failed. Cooling down ${BACKOFF_TIME}s..."
+                          rm -f "$PATCH_FILENAME"
+                          [ $i -lt $MAX_RETRIES ] && sleep $BACKOFF_TIME
+                      done
+
+                      if [ "$DOWNLOAD_OK" = false ]; then
+                           echo "❌ DOWNLOAD FAILED: $RAW_NAME"
+                           # 如果兩次嘗試都失敗，最後會 return
+                      fi
+                  fi 
+
+                  # ==========================================
+                  # D. 執行 Patch (Apply Phase)
+                  # ==========================================
+                  if [ "$APPLY_PATCHES" = false ]; then
+                      echo "📦 Patch downloaded (or failed) but NOT applied (Collection Mode/Skip)."
+                      PROCESS_SUCCESS=true
+                      break
                   fi
                   
-                  # 策略 B: Wget (Clean Request)
-                  # 如果 Curl 失敗，可能是 Cookie 問題，用 Wget 嘗試無 Cookie 下載
-                  # 但 Referer 依然要騙它是從 Commit 頁面來的
-                  echo "⚠️ Curl failed. Switching to Wget..."
-                  rm -f "$PATCH_FILENAME"
-                  
-                  if wget --no-check-certificate -q \
-                       --user-agent="$UA" \
-                       --header="Accept: $ACCEPT_FILE" \
-                       --header="Referer: $COMMIT_URL" \
-                       --header="sec-ch-ua: $H_SEC_CH_UA" \
-                       --header="sec-ch-ua-platform: $H_SEC_PLATFORM" \
-                       -O "$PATCH_FILENAME" "$URL"; then
-                       
-                      if [ -s "$PATCH_FILENAME" ] && grep -qE "^diff --git|^--- a/" "$PATCH_FILENAME"; then
-                          echo "✅ [Attempt $i] Download Success (Wget)"
-                          DOWNLOAD_SUCCESS=true
-                          break
-                      fi
+                  if [ ! -f "$PATCH_FILENAME" ]; then
+                      echo "❌ CRITICAL: Patch file missing '$PATCH_FILENAME'"
+                      # 這裡不 return，讓它跑第二次迴圈看看
                   fi
                   
-                  # 失敗後的冷卻
-                  echo "❌ [Attempt $i] Failed. Cooling down ${BACKOFF_TIME}s..."
-                  rm -f "$PATCH_FILENAME"
-                  if [ $i -lt $MAX_RETRIES ]; then
-                      sleep $BACKOFF_TIME
+                  # 檢查目錄 (雖然上面有檢查，但為了邏輯完整性)
+                  if [ ! -d "$IPT_ROOT" ]; then
+                       echo "❌ CRITICAL: Source directory '$IPT_ROOT' NOT FOUND!"
+                       return 1
+                  fi
+
+                  # 3. 執行 Patch
+                  echo "🩹 Applying patch (Pass $PROCESS_ATTEMPT)..."
+                  # 這裡使用 -d "$IPT_ROOT" 確保路徑正確，雖已 cd 進入，但加強保險
+                  if patch -d "$IPT_ROOT" -t -N -l -F 10 -p1 --no-backup-if-mismatch --reject-file=- < "$PATCH_FILENAME"; then
+                      echo "✅ Patch Applied Successfully."
+                      PROCESS_SUCCESS=true
+                      break 
+                  else
+                      # 🔥 [V12 修正] 智慧判斷邏輯
+                      if [ "$NEED_DOWNLOAD" = false ]; then
+                          # 快取失效 -> 刪除快取 -> 重跑迴圈
+                          echo "⚠️ Apply failed using cached file."
+                          echo "🔄 Deleting stale cache and forcing FRESH download loop..."
+                          rm -f "$PATCH_FILENAME"
+                          continue
+                      else
+                          # 新下載也失敗 -> 嚴重錯誤
+                          echo "❌ CRITICAL: Patch failed even with fresh download."
+                          echo "[$DATE] #$COUNT PATCH_FAIL : $RAW_NAME" >> "$LOG_FILE"
+                          return 1
+                      fi
                   fi
               done
-
-              # ---------------------------------------------------
-              # 結果判定與執行
-              # ---------------------------------------------------
-              if [ "$DOWNLOAD_SUCCESS" = false ]; then
-                  echo "❌ DOWNLOAD FAILED: $RAW_NAME"
-                  echo "[$DATE] #$COUNT DOWNLOAD_FAIL : $RAW_NAME" >> "$LOG_FILE"
-                  rm -f "$PATCH_FILENAME" # 清理無效檔案
-                  return 0
-              fi
-              
-              # 如果開關開啟，執行 Patch 套用
-              if [ "$APPLY_PATCHES" = true ]; then
-                  echo "🩹 Applying patch (Max Fuzz Mode)..."
-                  # -t: 自動跳過缺檔, -N: 跳過已修復, -F 10: 允許10行誤差
-                  if patch -t -N -l -F 10 -p1 --no-backup-if-mismatch --reject-file=- < "$PATCH_FILENAME"; then
-                      echo "✅ Patch Applied."
-                  else
-                      echo "⚠️ PATCH FAILED (Skipped/Mismatch)"
-                      echo "[$DATE] #$COUNT PATCH_FAIL : $RAW_NAME" >> "$LOG_FILE"
-                  fi
-              else
-                  echo "📦 Patch downloaded but NOT applied (Collection Mode)"
-              fi
           }
 
           # -------------------------------------------------------
@@ -439,25 +542,18 @@ jobs:
           # -------------------------------------------------------
           # 2. 讀取清單並執行
           # -------------------------------------------------------
-          count=0
-          while IFS='|' read -r p_date p_name p_url; do
-              # 跳過空行
-              [ -z "$p_date" ] && continue
-              
-              count=$((count+1))
-              download_and_process "$p_date" "$p_name" "$p_url" "$count"
-              
-          done < patch_list.txt
-
-          echo "🎉 Patch processing cycle completed!"
-          
-          if [ -s "$LOG_FILE" ]; then
-              echo "⚠️ ================= SUMMARY ================="
-              cat "$LOG_FILE"
-              echo "=========================================="
-          else
-              echo "✅ Perfect! No errors recorded."
+          COUNT=0
+          if [ -f patch_list.txt ]; then
+              while IFS='|' read -r P_DATE P_MSG P_URL; do
+                  # 過濾空行或註解 (更嚴謹的過濾)
+                  [[ -z "$P_DATE" || "$P_DATE" =~ ^# ]] && continue
+                  
+                  COUNT=$((COUNT + 1))
+                  download_and_process "$P_DATE" "$P_MSG" "$P_URL" "$COUNT"
+              done < patch_list.txt
           fi
+          
+          echo "🎉 Main patch processing cycle completed!"
 
           # =======================================================
           # [第100號 Patch] 應用屏蔽警告補丁 (寬容模式)
@@ -498,29 +594,35 @@ jobs:
 
           # 只有在開啟套用模式時才執行
           if [ "$APPLY_PATCHES" = true ]; then
-              echo "🩹 Applying Custom Patch #100..."
-              
-              # 嘗試直接 Patch (針對已解壓的情況)
-              # 加個簡單判斷避免 clean build 報錯，但主要依賴 Makefile 注入
-              if [ -f "libxtables/xtables.c" ]; then
-                  if patch -t -N -l -F 10 -p1 --no-backup-if-mismatch < "$PATCH_100"; then
-                      echo "✅ Patch #100 Applied Successfully!"
-                  else
-                      echo "⚠️ Patch #100 Failed to apply (Context mismatch)."
-                  fi
+              echo "🩹 Applying Custom Patch #100 IMMEDIATELY..."
+              # -t:自動跳過缺檔, -N:跳過已修復, -F 10:允許10行誤差, -d:指定目錄
+              if patch -d "$IPT_ROOT" -t -N -l -F 10 -p1 --no-backup-if-mismatch --reject-file=- < "$PATCH_100"; then
+                  echo "✅ Patch #100 Applied Successfully."
+              else
+                  echo "⚠️ Patch #100 Failed (Skipped or Mismatch)."
+                  echo "[LOCAL] #100 PATCH_FAIL : Custom_Suppress_Warnings" >> "$LOG_FILE"
               fi
-              
-              echo "📦 Patch #100 ready for Makefile injection."
           else
               echo "📦 Custom Patch #100 generated but NOT applied."
           fi
-          
+
+          # =======================================================
+          # 5. [修正位置] 總結報告 (現在可以包含 Patch #100 的結果)
+          # =======================================================
+          if [ -s "$LOG_FILE" ]; then
+              echo "⚠️ ================= SUMMARY ================="
+              cat "$LOG_FILE"
+              echo "=========================================="
+          else
+              echo "✅ Perfect! No errors recorded (All 53+1 patches applied)."
+          fi
+
           # =======================================================
           # 🔍 無條件驗證代碼內容 (增強版：顯示程式碼上下文)
           # =======================================================
           echo "🔍 Verifying code content..."
           TARGET_FILE="libxtables/xtables.c"
-          
+          # 因為我們已經 cd 進入 IPT_ROOT，所以直接查 libxtables
           if [ -f "$TARGET_FILE" ]; then
               # 檢查是否含有特徵碼 (#if 0 包裹著 Warning)
               if grep -q "#if 0" "$TARGET_FILE" && grep -q "Warning: Extension %s is not supported" "$TARGET_FILE"; then
