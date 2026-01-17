@@ -130,8 +130,35 @@ jobs:
               echo "⚠️ 警告：Makefile 版本不符"
               grep SRC_NAME Makefile
           fi
+
+          # =======================================================
+          # [新增修正] 5. 強制複製 Config (解決 config 遺失問題)
+          # =======================================================
+          echo "🔧 Fixing .config placement..."
           
-          # 5. 全局依賴修復
+          # 檢查外層是否有 .config (這是 padavan-ng 預設的設定檔)
+          if [ -f ".config" ]; then
+              echo "✅ Found .config in wrapper dir, copying to build dir..."
+              # 強制複製到原始碼目錄內
+              cp -f .config busybox-1.37.0/.config
+          else
+              echo "⚠️ Warning: No .config found! Trying to use default..."
+              # 如果真的找不到，嘗試從原始碼裡的預設檔複製 (備用方案)
+              if [ -f "busybox-1.37.0/examples/defconfig" ]; then
+                   cp busybox-1.37.0/examples/defconfig busybox-1.37.0/.config
+              fi
+          fi
+          
+          # 檢查是否複製成功
+          if [ ! -f "busybox-1.37.0/.config" ]; then
+              echo "❌ Critical Error: Still no .config inside busybox-1.37.0!"
+              echo "   List of files in $TARGET_DIR:"
+              ls -la "$TARGET_DIR"
+              exit 1
+          fi
+          # =======================================================
+          
+          # 6. 全局依賴修復
           echo "🔍 Patching dependencies..."
           OLD_VER="busybox-1.24.x"
           NEW_VER="busybox-1.37.0"
