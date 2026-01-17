@@ -1,0 +1,31 @@
+From d859b91e6f3ed055c22ee7b984b481c5b518d9e1 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Sat, 20 Jul 2024 02:23:28 +0200
+Subject: extensions: recent: New kernels support 999 hits
+
+Since kernel commit f4ebd03496f6 ("netfilter: xt_recent: Lift
+restrictions on max hitcount value"), the max supported hitcount value
+has increased significantly. Adjust the test to use a value which fails
+on old as well as new kernels.
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_recent.t | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extensions/libxt_recent.t b/extensions/libxt_recent.t
+index cf23aabc..3b0dd9fa 100644
+--- a/extensions/libxt_recent.t
++++ b/extensions/libxt_recent.t
+@@ -4,7 +4,7 @@
+ -m recent --rcheck --hitcount 12 --name foo --mask 255.255.255.255 --rsource;=;OK
+ -m recent --update --rttl;-m recent --update --rttl --name DEFAULT --mask 255.255.255.255 --rsource;OK
+ -m recent --set --rttl;;FAIL
+--m recent --rcheck --hitcount 999 --name foo --mask 255.255.255.255 --rsource;;FAIL
++-m recent --rcheck --hitcount 65536 --name foo --mask 255.255.255.255 --rsource;;FAIL
+ # nonsensical, but all should load successfully:
+ -m recent --rcheck --hitcount 3 --name foo --mask 255.255.255.255 --rsource -m recent --rcheck --hitcount 4 --name foo --mask 255.255.255.255 --rsource;=;OK
+ -m recent --rcheck --hitcount 4 --name foo --mask 255.255.255.255 --rsource -m recent --rcheck --hitcount 4 --name foo --mask 255.255.255.255 --rsource;=;OK
+-- 
+cgit v1.2.3
+

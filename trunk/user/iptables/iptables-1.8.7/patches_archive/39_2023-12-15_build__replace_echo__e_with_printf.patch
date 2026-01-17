@@ -1,0 +1,58 @@
+From f5cf76626d95d2c491a80288bccc160c53b44e88 Mon Sep 17 00:00:00 2001
+From: Jeremy Sowden <jeremy@azazel.net>
+Date: Thu, 14 Dec 2023 16:44:05 +0000
+Subject: build: replace `echo -e` with `printf`
+
+`echo -e` is not portable and we can end up with:
+
+      GEN      matches.man
+    -e      + ./libxt_addrtype.man
+    -e      + ./libip6t_ah.man
+    -e      + ./libipt_ah.man
+    -e      + ./libxt_bpf.man
+    -e      + ./libxt_cgroup.man
+    -e      + ./libxt_cluster.man
+    -e      + ./libxt_comment.man
+    -e      + ./libxt_connbytes.man
+    -e      + ./libxt_connlabel.man
+    -e      + ./libxt_connlimit.man
+    -e      + ./libxt_connmark.man
+    -e      + ./libxt_conntrack.man
+    [...]
+
+Signed-off-by: Jeremy Sowden <jeremy@azazel.net>
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/GNUmakefile.in | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/extensions/GNUmakefile.in b/extensions/GNUmakefile.in
+index dfa58c3b..20c2b7bc 100644
+--- a/extensions/GNUmakefile.in
++++ b/extensions/GNUmakefile.in
+@@ -228,19 +228,19 @@ man_run    = \
+ 	for ext in $(sort ${1}); do \
+ 		f="${srcdir}/libxt_$$ext.man"; \
+ 		if [ -f "$$f" ]; then \
+-			echo -e "\t+ $$f" >&2; \
++			printf "\t+ $$f\n" >&2; \
+ 			echo ".SS $$ext"; \
+ 			cat "$$f" || exit $$?; \
+ 		fi; \
+ 		f="${srcdir}/libip6t_$$ext.man"; \
+ 		if [ -f "$$f" ]; then \
+-			echo -e "\t+ $$f" >&2; \
++			printf "\t+ $$f\n" >&2; \
+ 			echo ".SS $$ext (IPv6-specific)"; \
+ 			cat "$$f" || exit $$?; \
+ 		fi; \
+ 		f="${srcdir}/libipt_$$ext.man"; \
+ 		if [ -f "$$f" ]; then \
+-			echo -e "\t+ $$f" >&2; \
++			printf "\t+ $$f\n" >&2; \
+ 			echo ".SS $$ext (IPv4-specific)"; \
+ 			cat "$$f" || exit $$?; \
+ 		fi; \
+-- 
+cgit v1.2.3
+

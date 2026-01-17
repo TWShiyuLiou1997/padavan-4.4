@@ -1,0 +1,33 @@
+From ef7781eb1437a2d6fd37eb3567c599e3ea682b96 Mon Sep 17 00:00:00 2001
+From: Florian Westphal <fw@strlen.de>
+Date: Mon, 19 Jul 2021 16:35:09 +0200
+Subject: libxtables: exit if called by setuid executeable
+
+iptables (legacy or nft, doesn't matter) cannot be safely used with
+setuid binaries.
+
+Add a safety check for this.
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ libxtables/xtables.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libxtables/xtables.c b/libxtables/xtables.c
+index 9fff1e0d..b261e97b 100644
+--- a/libxtables/xtables.c
++++ b/libxtables/xtables.c
+@@ -245,6 +245,10 @@ static void dlreg_free(void)
+ 
+ void xtables_init(void)
+ {
++	/* xtables cannot be used with setuid in a safe way. */
++	if (getuid() != geteuid())
++		_exit(111);
++
+ 	xtables_libdir = getenv("XTABLES_LIBDIR");
+ 	if (xtables_libdir != NULL)
+ 		return;
+-- 
+cgit v1.2.3
+

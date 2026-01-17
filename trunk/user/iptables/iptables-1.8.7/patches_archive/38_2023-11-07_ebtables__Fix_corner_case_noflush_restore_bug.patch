@@ -1,0 +1,65 @@
+From c1083acea70787eea3f7929fd04718434bb05ba8 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Tue, 7 Nov 2023 19:12:14 +0100
+Subject: ebtables: Fix corner-case noflush restore bug
+
+Report came from firwalld, but this is actually rather hard to trigger.
+Since a regular chain line prevents it, typical dump/restore use-cases
+are unaffected.
+
+Fixes: 73611d5582e72 ("ebtables-nft: add broute table emulation")
+Cc: Eric Garver <eric@garver.life>
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ .../shell/testcases/ebtables/0009-broute-bug_0     | 25 ++++++++++++++++++++++
+ iptables/xtables-eb.c                              |  2 ++
+ 2 files changed, 27 insertions(+)
+ create mode 100755 iptables/tests/shell/testcases/ebtables/0009-broute-bug_0
+
+diff --git a/iptables/tests/shell/testcases/ebtables/0009-broute-bug_0 b/iptables/tests/shell/testcases/ebtables/0009-broute-bug_0
+new file mode 100755
+index 00000000..0def0ac5
+--- /dev/null
++++ b/iptables/tests/shell/testcases/ebtables/0009-broute-bug_0
+@@ -0,0 +1,25 @@
++#!/bin/sh
++#
++# Missing BROUTING-awareness in ebt_get_current_chain() caused an odd caching bug when restoring:
++# - with --noflush
++# - a second table after the broute one
++# - A policy command but no chain line for BROUTING chain
++
++set -e
++
++case "$XT_MULTI" in
++*xtables-nft-multi)
++	;;
++*)
++	echo "skip $XT_MULTI"
++	exit 0
++	;;
++esac
++
++$XT_MULTI ebtables-restore --noflush <<EOF
++*broute
++-P BROUTING ACCEPT
++*nat
++-P PREROUTING ACCEPT
++COMMIT
++EOF
+diff --git a/iptables/xtables-eb.c b/iptables/xtables-eb.c
+index 08eec79d..a8ad57c7 100644
+--- a/iptables/xtables-eb.c
++++ b/iptables/xtables-eb.c
+@@ -169,6 +169,8 @@ int ebt_get_current_chain(const char *chain)
+ 		return NF_BR_LOCAL_OUT;
+ 	else if (strcmp(chain, "POSTROUTING") == 0)
+ 		return NF_BR_POST_ROUTING;
++	else if (strcmp(chain, "BROUTING") == 0)
++		return NF_BR_BROUTING;
+ 
+ 	/* placeholder for user defined chain */
+ 	return NF_BR_NUMHOOKS;
+-- 
+cgit v1.2.3
+

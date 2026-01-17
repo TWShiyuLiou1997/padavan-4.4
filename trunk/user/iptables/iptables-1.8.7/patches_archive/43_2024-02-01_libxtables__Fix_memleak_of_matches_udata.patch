@@ -1,0 +1,34 @@
+From e7366db80740d34d2fe4ba8d12ef86a423e66280 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Wed, 31 Jan 2024 14:58:17 +0100
+Subject: libxtables: Fix memleak of matches' udata
+
+If the extension specifies a non-zero udata_size, field 'udata' points
+to an allocated buffer which needs to be freed upon extension deinit.
+
+Interestingly, this bug was identified by ASAN and missed by valgrind.
+
+Fixes: 2dba676b68ef8 ("extensions: support for per-extension instance "global" variable space")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ libxtables/xtables.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libxtables/xtables.c b/libxtables/xtables.c
+index b4339e8d..856bfae8 100644
+--- a/libxtables/xtables.c
++++ b/libxtables/xtables.c
+@@ -1420,6 +1420,10 @@ void xtables_rule_matches_free(struct xtables_rule_match **matches)
+ 			free(matchp->match->m);
+ 			matchp->match->m = NULL;
+ 		}
++		if (matchp->match->udata_size) {
++			free(matchp->match->udata);
++			matchp->match->udata = NULL;
++		}
+ 		if (matchp->match == matchp->match->next) {
+ 			free(matchp->match);
+ 			matchp->match = NULL;
+-- 
+cgit v1.2.3
+

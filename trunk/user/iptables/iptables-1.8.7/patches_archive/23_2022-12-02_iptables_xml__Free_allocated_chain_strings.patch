@@ -1,0 +1,41 @@
+From 73da7fb74c1089391dac0aca70e13e5f5999ace7 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Fri, 25 Nov 2022 19:30:09 +0100
+Subject: iptables-xml: Free allocated chain strings
+
+Freeing only if 'created' is non-zero is wrong - the data was still
+allocated. In fact, the field is supposed to prevent only the call to
+openChain().
+
+Fixes: 8d3eccb19a9c6 ("Add iptables-xml tool (Amin Azez <azez@ufomechanic.net>)")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/iptables-xml.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/iptables/iptables-xml.c b/iptables/iptables-xml.c
+index d28cf748..396c0a12 100644
+--- a/iptables/iptables-xml.c
++++ b/iptables/iptables-xml.c
+@@ -225,13 +225,13 @@ finishChains(void)
+ {
+ 	int c;
+ 
+-	for (c = 0; c < nextChain; c++)
+-		if (!chains[c].created) {
++	for (c = 0; c < nextChain; c++) {
++		if (!chains[c].created)
+ 			openChain(chains[c].chain, chains[c].policy,
+ 				  &(chains[c].count), '/');
+-			free(chains[c].chain);
+-			free(chains[c].policy);
+-		}
++		free(chains[c].chain);
++		free(chains[c].policy);
++	}
+ 	nextChain = 0;
+ }
+ 
+-- 
+cgit v1.2.3
+

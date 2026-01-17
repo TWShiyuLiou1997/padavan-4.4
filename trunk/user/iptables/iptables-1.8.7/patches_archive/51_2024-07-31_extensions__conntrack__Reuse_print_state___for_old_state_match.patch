@@ -1,0 +1,74 @@
+From 1c86d5513cd79c1df1a5e473ce51256129723f3e Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Fri, 26 Jul 2024 13:21:09 +0200
+Subject: extensions: conntrack: Reuse print_state() for old state match
+
+The extra bits supported by print_state() won't be set by the parser, no
+functional change expected.
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_conntrack.c | 34 ++++------------------------------
+ 1 file changed, 4 insertions(+), 30 deletions(-)
+
+diff --git a/extensions/libxt_conntrack.c b/extensions/libxt_conntrack.c
+index ccbf731d..04940154 100644
+--- a/extensions/libxt_conntrack.c
++++ b/extensions/libxt_conntrack.c
+@@ -1102,32 +1102,6 @@ static void state_ct23_parse(struct xt_option_call *cb)
+ 		sinfo->invert_flags |= XT_CONNTRACK_STATE;
+ }
+ 
+-static void state_print_state(unsigned int statemask)
+-{
+-	const char *sep = "";
+-
+-	if (statemask & XT_CONNTRACK_STATE_INVALID) {
+-		printf("%sINVALID", sep);
+-		sep = ",";
+-	}
+-	if (statemask & XT_CONNTRACK_STATE_BIT(IP_CT_NEW)) {
+-		printf("%sNEW", sep);
+-		sep = ",";
+-	}
+-	if (statemask & XT_CONNTRACK_STATE_BIT(IP_CT_RELATED)) {
+-		printf("%sRELATED", sep);
+-		sep = ",";
+-	}
+-	if (statemask & XT_CONNTRACK_STATE_BIT(IP_CT_ESTABLISHED)) {
+-		printf("%sESTABLISHED", sep);
+-		sep = ",";
+-	}
+-	if (statemask & XT_CONNTRACK_STATE_UNTRACKED) {
+-		printf("%sUNTRACKED", sep);
+-		sep = ",";
+-	}
+-}
+-
+ static void
+ state_print(const void *ip,
+       const struct xt_entry_match *match,
+@@ -1135,16 +1109,16 @@ state_print(const void *ip,
+ {
+ 	const struct xt_state_info *sinfo = (const void *)match->data;
+ 
+-	printf(" state ");
+-	state_print_state(sinfo->statemask);
++	printf(" state");
++	print_state(sinfo->statemask);
+ }
+ 
+ static void state_save(const void *ip, const struct xt_entry_match *match)
+ {
+ 	const struct xt_state_info *sinfo = (const void *)match->data;
+ 
+-	printf(" --state ");
+-	state_print_state(sinfo->statemask);
++	printf(" --state");
++	print_state(sinfo->statemask);
+ }
+ 
+ static void state_xlate_print(struct xt_xlate *xl, unsigned int statemask, int inverted)
+-- 
+cgit v1.2.3
+

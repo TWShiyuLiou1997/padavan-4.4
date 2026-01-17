@@ -1,0 +1,40 @@
+From bef9dc575625a98a5e6ed8ca37e49031cdba5937 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Mon, 9 Aug 2021 18:48:58 +0200
+Subject: extensions: hashlimit: Fix tests with HZ=100
+
+With the kernel ticking at 100Hz, a limit of 1/day with burst 5 does not
+overflow in kernel, making the test unstable depending on kernel config.
+Change it to not overflow with 1000Hz either by increasing the burst
+value by a factor of 100.
+
+Fixes: fcf9f6f25db11 ("extensions: libxt_hashlimit: add unit test")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_hashlimit.t | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/extensions/libxt_hashlimit.t b/extensions/libxt_hashlimit.t
+index ccd0d1e6..83699337 100644
+--- a/extensions/libxt_hashlimit.t
++++ b/extensions/libxt_hashlimit.t
+@@ -3,14 +3,12 @@
+ -m hashlimit --hashlimit-above 1000000/sec --hashlimit-burst 5 --hashlimit-name mini1;=;OK
+ -m hashlimit --hashlimit-above 1/min --hashlimit-burst 5 --hashlimit-name mini1;=;OK
+ -m hashlimit --hashlimit-above 1/hour --hashlimit-burst 5 --hashlimit-name mini1;=;OK
+-# kernel says "xt_hashlimit: overflow, try lower: 864000000/5"
+--m hashlimit --hashlimit-above 1/day --hashlimit-burst 5 --hashlimit-name mini1;;FAIL
++-m hashlimit --hashlimit-above 1/day --hashlimit-burst 500 --hashlimit-name mini1;=;OK
+ -m hashlimit --hashlimit-upto 1/sec --hashlimit-burst 5 --hashlimit-name mini1;=;OK
+ -m hashlimit --hashlimit-upto 1000000/sec --hashlimit-burst 5 --hashlimit-name mini1;=;OK
+ -m hashlimit --hashlimit-upto 1/min --hashlimit-burst 5 --hashlimit-name mini1;=;OK
+ -m hashlimit --hashlimit-upto 1/hour --hashlimit-burst 5 --hashlimit-name mini1;=;OK
+-# kernel says "xt_hashlimit: overflow, try lower: 864000000/5"
+--m hashlimit --hashlimit-upto 1/day --hashlimit-burst 5 --hashlimit-name mini1;;FAIL
++-m hashlimit --hashlimit-upto 1/day --hashlimit-burst 500 --hashlimit-name mini1;=;OK
+ -m hashlimit --hashlimit-upto 1/sec --hashlimit-burst 1 --hashlimit-name mini1 --hashlimit-htable-expire 2000;=;OK
+ -m hashlimit --hashlimit-upto 1/sec --hashlimit-burst 1 --hashlimit-mode srcip --hashlimit-name mini1 --hashlimit-htable-expire 2000;=;OK
+ -m hashlimit --hashlimit-upto 1/sec --hashlimit-burst 1 --hashlimit-mode dstip --hashlimit-name mini1 --hashlimit-htable-expire 2000;=;OK
+-- 
+cgit v1.2.3
+

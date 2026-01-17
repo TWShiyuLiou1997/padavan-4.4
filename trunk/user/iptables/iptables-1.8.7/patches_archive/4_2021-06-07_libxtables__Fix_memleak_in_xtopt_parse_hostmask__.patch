@@ -1,0 +1,28 @@
+From ffe88f8f01263687e82ef4d3d2bdc0cb5444711e Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Wed, 2 Jun 2021 11:04:30 +0200
+Subject: libxtables: Fix memleak in xtopt_parse_hostmask()
+
+The allocated hostmask duplicate needs to be freed again.
+
+Fixes: 66266abd17adc ("libxtables: XTTYPE_HOSTMASK support")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ libxtables/xtoptions.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libxtables/xtoptions.c b/libxtables/xtoptions.c
+index d329f2ff..0dcdf607 100644
+--- a/libxtables/xtoptions.c
++++ b/libxtables/xtoptions.c
+@@ -763,6 +763,7 @@ static void xtopt_parse_hostmask(struct xt_option_call *cb)
+ 	cb->arg = p;
+ 	xtopt_parse_plenmask(cb);
+ 	cb->arg = orig_arg;
++	free(work);
+ }
+ 
+ static void xtopt_parse_ethermac(struct xt_option_call *cb)
+-- 
+cgit v1.2.3
+

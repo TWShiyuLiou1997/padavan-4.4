@@ -1,0 +1,125 @@
+From 18d7535d8bce1a13668e9982f53cbd3e56e8c634 Mon Sep 17 00:00:00 2001
+From: Alexander Mikhalitsyn <alexander.mikhalitsyn@virtuozzo.com>
+Date: Thu, 1 Apr 2021 16:47:08 +0300
+Subject: extensions: libxt_conntrack: use bitops for status negation
+
+At the moment, status_xlate_print function prints statusmask as comma-separated
+sequence of enabled statusmask flags. But if we have inverted conntrack ctstatus
+condition then we have to use more complex expression (if more than one flag enabled)
+because nft not supports syntax like "ct status != expected,assured".
+
+Examples:
+! --ctstatus CONFIRMED,ASSURED
+should be translated as
+ct status & (assured|confirmed) == 0
+
+! --ctstatus CONFIRMED
+can be translated as
+ct status & confirmed == 0
+
+See also netfilter/xt_conntrack.c (conntrack_mt() function as a reference).
+
+Reproducer:
+$ iptables -A INPUT -d 127.0.0.1/32 -p tcp -m conntrack ! --ctstatus expected,assured -j DROP
+$ nft list ruleset
+...
+meta l4proto tcp ip daddr 127.0.0.1 ct status != expected,assured counter packets 0 bytes 0 drop
+...
+
+it will fail if we try to load this rule:
+$ nft -f nft_test
+../nft_test:6:97-97: Error: syntax error, unexpected comma, expecting newline or semicolon
+
+Cc: Florian Westphal <fw@strlen.de>
+Signed-off-by: Alexander Mikhalitsyn <alexander.mikhalitsyn@virtuozzo.com>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ extensions/libxt_conntrack.c      | 30 +++++++++++++++++++++---------
+ extensions/libxt_conntrack.txlate |  8 +++++++-
+ 2 files changed, 28 insertions(+), 10 deletions(-)
+
+diff --git a/extensions/libxt_conntrack.c b/extensions/libxt_conntrack.c
+index 91f9e4aa..7f7b45ee 100644
+--- a/extensions/libxt_conntrack.c
++++ b/extensions/libxt_conntrack.c
+@@ -1200,26 +1200,39 @@ static int state_xlate(struct xt_xlate *xl,
+ 	return 1;
+ }
+ 
+-static void status_xlate_print(struct xt_xlate *xl, unsigned int statusmask)
++static void status_xlate_print(struct xt_xlate *xl, unsigned int statusmask, int inverted)
+ {
+ 	const char *sep = "";
++	int one_flag_set;
++
++	one_flag_set = !(statusmask & (statusmask - 1));
++
++	if (inverted && !one_flag_set)
++		xt_xlate_add(xl, "& (");
++	else if (inverted)
++		xt_xlate_add(xl, "& ");
+ 
+ 	if (statusmask & IPS_EXPECTED) {
+ 		xt_xlate_add(xl, "%s%s", sep, "expected");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
+ 	if (statusmask & IPS_SEEN_REPLY) {
+ 		xt_xlate_add(xl, "%s%s", sep, "seen-reply");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
+ 	if (statusmask & IPS_ASSURED) {
+ 		xt_xlate_add(xl, "%s%s", sep, "assured");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
+ 	if (statusmask & IPS_CONFIRMED) {
+ 		xt_xlate_add(xl, "%s%s", sep, "confirmed");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
++
++	if (inverted && !one_flag_set)
++		xt_xlate_add(xl, ") == 0");
++	else if (inverted)
++		xt_xlate_add(xl, " == 0");
+ }
+ 
+ static void addr_xlate_print(struct xt_xlate *xl,
+@@ -1277,10 +1290,9 @@ static int _conntrack3_mt_xlate(struct xt_xlate *xl,
+ 	}
+ 
+ 	if (sinfo->match_flags & XT_CONNTRACK_STATUS) {
+-		xt_xlate_add(xl, "%sct status %s", space,
+-			     sinfo->invert_flags & XT_CONNTRACK_STATUS ?
+-			     "!= " : "");
+-		status_xlate_print(xl, sinfo->status_mask);
++		xt_xlate_add(xl, "%sct status ", space);
++		status_xlate_print(xl, sinfo->status_mask,
++				   sinfo->invert_flags & XT_CONNTRACK_STATUS);
+ 		space = " ";
+ 	}
+ 
+diff --git a/extensions/libxt_conntrack.txlate b/extensions/libxt_conntrack.txlate
+index 5ab85b17..8cc7c504 100644
+--- a/extensions/libxt_conntrack.txlate
++++ b/extensions/libxt_conntrack.txlate
+@@ -35,7 +35,13 @@ iptables-translate -t filter -A INPUT -m conntrack --ctstatus EXPECTED -j ACCEPT
+ nft add rule ip filter INPUT ct status expected counter accept
+ 
+ iptables-translate -t filter -A INPUT -m conntrack ! --ctstatus CONFIRMED -j ACCEPT
+-nft add rule ip filter INPUT ct status != confirmed counter accept
++nft add rule ip filter INPUT ct status & confirmed == 0 counter accept
++
++iptables-translate -t filter -A INPUT -m conntrack ! --ctstatus CONFIRMED,ASSURED -j ACCEPT
++nft add rule ip filter INPUT ct status & (assured|confirmed) == 0 counter accept
++
++iptables-translate -t filter -A INPUT -m conntrack --ctstatus CONFIRMED,ASSURED -j ACCEPT
++nft add rule ip filter INPUT ct status assured,confirmed counter accept
+ 
+ iptables-translate -t filter -A INPUT -m conntrack --ctexpire 3 -j ACCEPT
+ nft add rule ip filter INPUT ct expiration 3 counter accept
+-- 
+cgit v1.2.3
+

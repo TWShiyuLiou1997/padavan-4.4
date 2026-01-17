@@ -1,0 +1,29 @@
+From 15a31ba8e8e146a5dafce59160b2eeefb00bccca Mon Sep 17 00:00:00 2001
+From: Florian Westphal <fw@strlen.de>
+Date: Fri, 17 Jun 2022 23:34:52 +0200
+Subject: iptables.8: mention that iptables exits when setuid
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ iptables/iptables.8.in | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/iptables/iptables.8.in b/iptables/iptables.8.in
+index 627ff0e4..f81c632f 100644
+--- a/iptables/iptables.8.in
++++ b/iptables/iptables.8.in
+@@ -417,6 +417,11 @@ other errors cause an exit code of 1.
+ .SH BUGS
+ Bugs?  What's this? ;-)
+ Well, you might want to have a look at http://bugzilla.netfilter.org/
++\fBiptables\fP will exit immediately with an error code of 111 if it finds
++that it was called as a setuid-to-root program.
++iptables cannot be used safely in this manner because it trusts
++the shared libraries (matches, targets) loaded at run time, the search
++path can be set using environment variables.
+ .SH COMPATIBILITY WITH IPCHAINS
+ This \fBiptables\fP
+ is very similar to ipchains by Rusty Russell.  The main difference is
+-- 
+cgit v1.2.3
+

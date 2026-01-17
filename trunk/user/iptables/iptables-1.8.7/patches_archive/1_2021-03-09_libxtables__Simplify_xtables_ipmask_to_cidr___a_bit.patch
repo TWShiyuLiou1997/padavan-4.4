@@ -1,0 +1,42 @@
+From 831f57c7fbdc8d79e34b1d7d81ca6f6a8e6bae87 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Tue, 2 Mar 2021 15:07:13 +0100
+Subject: libxtables: Simplify xtables_ipmask_to_cidr() a bit
+
+Reduce the whole mask matching into a single for-loop. No need for a
+shortcut, /32 masks will match in the first iteration.
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ libxtables/xtables.c | 15 +++++----------
+ 1 file changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/libxtables/xtables.c b/libxtables/xtables.c
+index bc42ba82..fc3f6220 100644
+--- a/libxtables/xtables.c
++++ b/libxtables/xtables.c
+@@ -1430,16 +1430,11 @@ int xtables_ipmask_to_cidr(const struct in_addr *mask)
+ 	int i;
+ 
+ 	maskaddr = ntohl(mask->s_addr);
+-	/* shortcut for /32 networks */
+-	if (maskaddr == 0xFFFFFFFFL)
+-		return 32;
+-
+-	i = 32;
+-	bits = 0xFFFFFFFEL;
+-	while (--i >= 0 && maskaddr != bits)
+-		bits <<= 1;
+-	if (i >= 0)
+-		return i;
++
++	for (i = 32, bits = (uint32_t)-1; i >= 0; i--, bits <<= 1) {
++		if (bits == maskaddr)
++			return i;
++	}
+ 
+ 	/* this mask cannot be converted to CIDR notation */
+ 	return -1;
+-- 
+cgit v1.2.3
+

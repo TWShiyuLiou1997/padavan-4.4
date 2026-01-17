@@ -1,0 +1,52 @@
+From 82ccfb488eeac5507471099b9b4e6d136cc06e3b Mon Sep 17 00:00:00 2001
+From: Jacek Tomasiak <jacek.tomasiak@gmail.com>
+Date: Mon, 19 Jun 2023 13:46:36 +0200
+Subject: iptables: Fix handling of non-existent chains
+
+Since 694612adf87 the "compatibility" check considers non-existent
+chains as "incompatible". This broke some scripts which used calls
+like `iptables -L CHAIN404` to test for chain existence and expect
+"No chain/target/match by that name." in the output.
+
+This patch changes the logic of `nft_is_table_compatible()` to
+report non-existent chains as "compatible" which restores the old
+behavior.
+
+Fixes: 694612adf87 ("nft: Fix selective chain compatibility checks")
+Closes: https://bugzilla.netfilter.org/show_bug.cgi?id=1648
+Signed-off-by: Jacek Tomasiak <jtomasiak@arista.com>
+Signed-off-by: Jacek Tomasiak <jacek.tomasiak@gmail.com>
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/nft.c                                              | 2 +-
+ iptables/tests/shell/testcases/iptables/0004-return-codes_0 | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/iptables/nft.c b/iptables/nft.c
+index 1cb104e7..020553a4 100644
+--- a/iptables/nft.c
++++ b/iptables/nft.c
+@@ -3860,7 +3860,7 @@ bool nft_is_table_compatible(struct nft_handle *h,
+ 	if (chain) {
+ 		struct nft_chain *c = nft_chain_find(h, table, chain);
+ 
+-		return c && !nft_is_chain_compatible(c, h);
++		return !c || !nft_is_chain_compatible(c, h);
+ 	}
+ 
+ 	return !nft_chain_foreach(h, table, nft_is_chain_compatible, h);
+diff --git a/iptables/tests/shell/testcases/iptables/0004-return-codes_0 b/iptables/tests/shell/testcases/iptables/0004-return-codes_0
+index 33c5f1f3..234f3040 100755
+--- a/iptables/tests/shell/testcases/iptables/0004-return-codes_0
++++ b/iptables/tests/shell/testcases/iptables/0004-return-codes_0
+@@ -58,6 +58,7 @@ cmd 1 "$ENOENT" -Z bar
+ cmd 0 -E foo bar
+ cmd 1 "$EEXIST_F" -E foo bar
+ cmd 1 "$ENOENT" -E foo bar2
++cmd 1 "$ENOENT" -L foo
+ cmd 0 -N foo2
+ cmd 1 "$EEXIST_F" -E foo2 bar
+ 
+-- 
+cgit v1.2.3
+

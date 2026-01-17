@@ -1,0 +1,54 @@
+From dba32a76aacf84181a9bd3ba1e301e59ab49d370 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Sat, 1 Oct 2022 00:36:50 +0200
+Subject: extensions: TCPOPTSTRIP: Do not print empty options
+
+No point in printing anything if none of the bits are set.
+
+Fixes: aef4c1e727563 ("libxt_TCPOPTSTRIP")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_TCPOPTSTRIP.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/extensions/libxt_TCPOPTSTRIP.c b/extensions/libxt_TCPOPTSTRIP.c
+index 6ea34892..ff873f98 100644
+--- a/extensions/libxt_TCPOPTSTRIP.c
++++ b/extensions/libxt_TCPOPTSTRIP.c
+@@ -142,6 +142,13 @@ tcpoptstrip_print_list(const struct xt_tcpoptstrip_target_info *info,
+ 	}
+ }
+ 
++static bool tcpoptstrip_empty(const struct xt_tcpoptstrip_target_info *info)
++{
++	static const struct xt_tcpoptstrip_target_info empty = {};
++
++	return memcmp(info, &empty, sizeof(empty)) == 0;
++}
++
+ static void
+ tcpoptstrip_tg_print(const void *ip, const struct xt_entry_target *target,
+                      int numeric)
+@@ -149,6 +156,9 @@ tcpoptstrip_tg_print(const void *ip, const struct xt_entry_target *target,
+ 	const struct xt_tcpoptstrip_target_info *info =
+ 		(const void *)target->data;
+ 
++	if (tcpoptstrip_empty(info))
++		return;
++
+ 	printf(" TCPOPTSTRIP options ");
+ 	tcpoptstrip_print_list(info, numeric);
+ }
+@@ -159,6 +169,9 @@ tcpoptstrip_tg_save(const void *ip, const struct xt_entry_target *target)
+ 	const struct xt_tcpoptstrip_target_info *info =
+ 		(const void *)target->data;
+ 
++	if (tcpoptstrip_empty(info))
++		return;
++
+ 	printf(" --strip-options ");
+ 	tcpoptstrip_print_list(info, true);
+ }
+-- 
+cgit v1.2.3
+

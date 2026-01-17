@@ -1,0 +1,63 @@
+From 2dbb49d15fb44ddd521a734eca3be3f940b7c1ba Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Fri, 11 Feb 2022 17:39:24 +0100
+Subject: libxtables: Register only the highest revision extension
+
+When fully registering extensions, ignore all consecutive ones with same
+name and family value. Since commit b3ac87038f4e4 ("libxtables: Make
+sure extensions register in revision order"), one may safely assume the
+list of pending extensions has highest revision numbers first. Since
+iptables is only interested in the highest revision the kernel supports,
+registration and compatibility checks may be skipped once the first
+matching extension in pending list has validated.
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ libxtables/xtables.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/libxtables/xtables.c b/libxtables/xtables.c
+index 50fd6a44..b34d62ac 100644
+--- a/libxtables/xtables.c
++++ b/libxtables/xtables.c
+@@ -697,6 +697,7 @@ xtables_find_match(const char *name, enum xtables_tryload tryload,
+ 	struct xtables_match **dptr;
+ 	struct xtables_match *ptr;
+ 	const char *icmp6 = "icmp6";
++	bool found = false;
+ 
+ 	if (strlen(name) >= XT_EXTENSION_MAXNAMELEN)
+ 		xtables_error(PARAMETER_PROBLEM,
+@@ -715,7 +716,9 @@ xtables_find_match(const char *name, enum xtables_tryload tryload,
+ 		if (extension_cmp(name, (*dptr)->name, (*dptr)->family)) {
+ 			ptr = *dptr;
+ 			*dptr = (*dptr)->next;
+-			if (xtables_fully_register_pending_match(ptr, prev)) {
++			if (!found &&
++			    xtables_fully_register_pending_match(ptr, prev)) {
++				found = true;
+ 				prev = ptr;
+ 				continue;
+ 			} else if (prev) {
+@@ -817,6 +820,7 @@ xtables_find_target(const char *name, enum xtables_tryload tryload)
+ 	struct xtables_target *prev = NULL;
+ 	struct xtables_target **dptr;
+ 	struct xtables_target *ptr;
++	bool found = false;
+ 
+ 	/* Standard target? */
+ 	if (strcmp(name, "") == 0
+@@ -831,7 +835,9 @@ xtables_find_target(const char *name, enum xtables_tryload tryload)
+ 		if (extension_cmp(name, (*dptr)->name, (*dptr)->family)) {
+ 			ptr = *dptr;
+ 			*dptr = (*dptr)->next;
+-			if (xtables_fully_register_pending_target(ptr, prev)) {
++			if (!found &&
++			    xtables_fully_register_pending_target(ptr, prev)) {
++				found = true;
+ 				prev = ptr;
+ 				continue;
+ 			} else if (prev) {
+-- 
+cgit v1.2.3
+

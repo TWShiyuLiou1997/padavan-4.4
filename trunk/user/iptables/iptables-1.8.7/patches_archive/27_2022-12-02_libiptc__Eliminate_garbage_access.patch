@@ -1,0 +1,46 @@
+From 39a2aa8cbfc99f4a75dfc0786a80ced90952ab29 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Wed, 30 Nov 2022 20:03:30 +0100
+Subject: libiptc: Eliminate garbage access
+
+When adding a rule, valgrind prints:
+
+Syscall param socketcall.setsockopt(optval) points to uninitialised byte(s)
+   at 0x4A8165A: setsockopt (in /lib64/libc.so.6)
+   by 0x4857A48: iptc_commit (libiptc.c:2676)
+   by 0x10E4BB: iptables_main (iptables-standalone.c:61)
+   by 0x49A3349: (below main) (in /lib64/libc.so.6)
+ Address 0x4b63788 is 40 bytes inside a block of size 1,448 alloc'd
+   at 0x484659F: calloc (vg_replace_malloc.c:1328)
+   by 0x4857654: iptc_commit (libiptc.c:2564)
+   by 0x10E4BB: iptables_main (iptables-standalone.c:61)
+   by 0x49A3349: (below main) (in /lib64/libc.so.6)
+
+This is because repl->counters is not initialized upon allocation. Since
+the field is an array, make use of calloc() which implicitly does the
+initialization.
+
+Fixes: e37c0dc100c51 ("Revert the recent addition of memset()'s to TC_COMMIT. One of them is bogus and the other one needs more investigation to why valgrind is complaining.")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ libiptc/libiptc.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libiptc/libiptc.c b/libiptc/libiptc.c
+index 97823f93..f9b7779e 100644
+--- a/libiptc/libiptc.c
++++ b/libiptc/libiptc.c
+@@ -2554,8 +2554,8 @@ TC_COMMIT(struct xtc_handle *handle)
+ 			+ sizeof(STRUCT_COUNTERS) * new_number;
+ 
+ 	/* These are the old counters we will get from kernel */
+-	repl->counters = malloc(sizeof(STRUCT_COUNTERS)
+-				* handle->info.num_entries);
++	repl->counters = calloc(handle->info.num_entries,
++				sizeof(STRUCT_COUNTERS));
+ 	if (!repl->counters) {
+ 		errno = ENOMEM;
+ 		goto out_free_repl;
+-- 
+cgit v1.2.3
+

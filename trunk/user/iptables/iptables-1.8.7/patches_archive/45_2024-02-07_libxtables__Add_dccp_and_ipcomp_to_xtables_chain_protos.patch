@@ -1,0 +1,33 @@
+From a369c736a7fa88a176dbdb17fd50cf30074f54ab Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Wed, 10 Jan 2024 23:22:32 +0100
+Subject: libxtables: Add dccp and ipcomp to xtables_chain_protos
+
+There are "protocol extensions" for both just like with TCP or UDP.
+Caching their values allows for implicit extension lookup after '-p'
+flag, for instance:
+
+| iptables -A FORWARD -p dccp --dport 1
+| iptables -A FORWARD -p ipcomp --ipcompspi 18
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ libxtables/xtables.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/libxtables/xtables.c b/libxtables/xtables.c
+index ae3ff25a..f2fcc5c2 100644
+--- a/libxtables/xtables.c
++++ b/libxtables/xtables.c
+@@ -2203,6 +2203,8 @@ const struct xtables_pprot xtables_chain_protos[] = {
+ 	{"mobility-header", IPPROTO_MH},
+ 	{"ipv6-mh",   IPPROTO_MH},
+ 	{"mh",        IPPROTO_MH},
++	{"dccp",      IPPROTO_DCCP},
++	{"ipcomp",    IPPROTO_COMP},
+ 	{"all",       0},
+ 	{NULL},
+ };
+-- 
+cgit v1.2.3
+

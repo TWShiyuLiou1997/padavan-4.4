@@ -1,0 +1,50 @@
+From 0687852da7ed0a7ec8ebc88b41031dcae18c8898 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Mon, 27 Sep 2021 16:59:49 +0200
+Subject: xtables-standalone: Drop version number from init errors
+
+Aside from the rather unconventional formatting, if those initialization
+functions fail we've either released a completely broken iptables or
+the wrong libraries are chosen by the loader. In both cases, the version
+number is not really interesting.
+
+While being at it, fix indenting of the first exit() call.
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/xtables-standalone.c | 12 ++++--------
+ 1 file changed, 4 insertions(+), 8 deletions(-)
+
+diff --git a/iptables/xtables-standalone.c b/iptables/xtables-standalone.c
+index f4d40cda..54c70c54 100644
+--- a/iptables/xtables-standalone.c
++++ b/iptables/xtables-standalone.c
+@@ -49,10 +49,8 @@ xtables_main(int family, const char *progname, int argc, char *argv[])
+ 	xtables_globals.program_name = progname;
+ 	ret = xtables_init_all(&xtables_globals, family);
+ 	if (ret < 0) {
+-		fprintf(stderr, "%s/%s Failed to initialize xtables\n",
+-				xtables_globals.program_name,
+-				xtables_globals.program_version);
+-				exit(1);
++		fprintf(stderr, "%s: Failed to initialize xtables\n", progname);
++		exit(1);
+ 	}
+ #if defined(ALL_INCLUSIVE) || defined(NO_SHARED_LIBS)
+ 	init_extensions();
+@@ -61,10 +59,8 @@ xtables_main(int family, const char *progname, int argc, char *argv[])
+ #endif
+ 
+ 	if (nft_init(&h, family) < 0) {
+-		fprintf(stderr, "%s/%s Failed to initialize nft: %s\n",
+-				xtables_globals.program_name,
+-				xtables_globals.program_version,
+-				strerror(errno));
++		fprintf(stderr, "%s: Failed to initialize nft: %s\n",
++			xtables_globals.program_name, strerror(errno));
+ 		exit(EXIT_FAILURE);
+ 	}
+ 
+-- 
+cgit v1.2.3
+

@@ -1,0 +1,90 @@
+From fb63f8b7337aa11a667537e6a3b399062ede2eb5 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Fri, 25 Nov 2022 21:35:28 +0100
+Subject: iptables: Plug memleaks in print_firewall()
+
+When adding a rule in verbose mode, valgrind prints:
+
+192 bytes in 1 blocks are definitely lost in loss record 1 of 2
+   at 0x48417E5: malloc (vg_replace_malloc.c:381)
+   by 0x486B158: xtables_malloc (xtables.c:446)
+   by 0x486C1F6: xtables_find_match (xtables.c:826)
+   by 0x10E684: print_match (iptables.c:115)
+   by 0x10E684: print_firewall (iptables.c:169)
+   by 0x10FC0C: print_firewall_line (iptables.c:196)
+   by 0x10FC0C: append_entry (iptables.c:221)
+   by 0x10FC0C: do_command4 (iptables.c:776)
+   by 0x10E45B: iptables_main (iptables-standalone.c:59)
+   by 0x49A2349: (below main) (in /lib64/libc.so.6)
+
+200 bytes in 1 blocks are definitely lost in loss record 2 of 2
+   at 0x48417E5: malloc (vg_replace_malloc.c:381)
+   by 0x486B158: xtables_malloc (xtables.c:446)
+   by 0x486BBD6: xtables_find_target (xtables.c:956)
+   by 0x10E579: print_firewall (iptables.c:145)
+   by 0x10FC0C: print_firewall_line (iptables.c:196)
+   by 0x10FC0C: append_entry (iptables.c:221)
+   by 0x10FC0C: do_command4 (iptables.c:776)
+   by 0x10E45B: iptables_main (iptables-standalone.c:59)
+   by 0x49A2349: (below main) (in /lib64/libc.so.6)
+
+If the match/target was cloned, it needs to be freed. Basically a bug since
+day 1.
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/ip6tables.c | 6 ++++++
+ iptables/iptables.c  | 6 ++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/iptables/ip6tables.c b/iptables/ip6tables.c
+index 062b2b15..1d232657 100644
+--- a/iptables/ip6tables.c
++++ b/iptables/ip6tables.c
+@@ -122,6 +122,9 @@ print_match(const struct xt_entry_match *m,
+ 			printf("%s%s ", match->name, unsupported_rev);
+ 		else
+ 			printf("%s ", match->name);
++
++		if (match->next == match)
++			free(match);
+ 	} else {
+ 		if (name[0])
+ 			printf("UNKNOWN match `%s' ", name);
+@@ -179,6 +182,9 @@ print_firewall(const struct ip6t_entry *fw,
+ 			tg->print(&fw->ipv6, t, format & FMT_NUMERIC);
+ 		else if (target->print)
+ 			printf(" %s%s", target->name, unsupported_rev);
++
++		if (target->next == target)
++			free(target);
+ 	} else if (t->u.target_size != sizeof(*t))
+ 		printf("[%u bytes of unknown target data] ",
+ 		       (unsigned int)(t->u.target_size - sizeof(*t)));
+diff --git a/iptables/iptables.c b/iptables/iptables.c
+index 0351b39f..d246198f 100644
+--- a/iptables/iptables.c
++++ b/iptables/iptables.c
+@@ -122,6 +122,9 @@ print_match(const struct xt_entry_match *m,
+ 			printf("%s%s ", match->name, unsupported_rev);
+ 		else
+ 			printf("%s ", match->name);
++
++		if (match->next == match)
++			free(match);
+ 	} else {
+ 		if (name[0])
+ 			printf("UNKNOWN match `%s' ", name);
+@@ -178,6 +181,9 @@ print_firewall(const struct ipt_entry *fw,
+ 			tg->print(&fw->ip, t, format & FMT_NUMERIC);
+ 		else if (target->print)
+ 			printf(" %s%s", target->name, unsupported_rev);
++
++		if (target->next == target)
++			free(target);
+ 	} else if (t->u.target_size != sizeof(*t))
+ 		printf("[%u bytes of unknown target data] ",
+ 		       (unsigned int)(t->u.target_size - sizeof(*t)));
+-- 
+cgit v1.2.3
+

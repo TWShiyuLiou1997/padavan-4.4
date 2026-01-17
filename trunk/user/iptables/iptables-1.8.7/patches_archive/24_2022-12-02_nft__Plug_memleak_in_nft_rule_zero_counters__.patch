@@ -1,0 +1,50 @@
+From aa0c54030300441e9fd66c7016d0090f6736d449 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Fri, 25 Nov 2022 21:21:22 +0100
+Subject: nft: Plug memleak in nft_rule_zero_counters()
+
+When zeroing a specific rule, valgrind reports:
+
+40 bytes in 1 blocks are definitely lost in loss record 1 of 1
+   at 0x484659F: calloc (vg_replace_malloc.c:1328)
+   by 0x48DE128: xtables_calloc (xtables.c:434)
+   by 0x11C7C6: nft_parse_immediate (nft-shared.c:1071)
+   by 0x11C7C6: nft_rule_to_iptables_command_state (nft-shared.c:1236)
+   by 0x119AF5: nft_rule_zero_counters (nft.c:2877)
+   by 0x11A3CA: nft_prepare (nft.c:3445)
+   by 0x11A7A8: nft_commit (nft.c:3479)
+   by 0x114258: xtables_main.isra.0 (xtables-standalone.c:94)
+   by 0x1142D9: xtables_ip6_main (xtables-standalone.c:118)
+   by 0x49F2349: (below main) (in /lib64/libc.so.6)
+
+Have to free the matches/target in populated iptables_command_state object
+again. While being at it, call the proper family_ops callbacks since this is
+family-agnostic code.
+
+Fixes: a69cc575295ee ("xtables: allow to reset the counters of an existing rule")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/nft.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/iptables/nft.c b/iptables/nft.c
+index 67c5877c..430888e8 100644
+--- a/iptables/nft.c
++++ b/iptables/nft.c
+@@ -2874,10 +2874,11 @@ int nft_rule_zero_counters(struct nft_handle *h, const char *chain,
+ 		goto error;
+ 	}
+ 
+-	nft_rule_to_iptables_command_state(h, r, &cs);
+-
++	h->ops->rule_to_cs(h, r, &cs);
+ 	cs.counters.pcnt = cs.counters.bcnt = 0;
+ 	new_rule = nft_rule_new(h, chain, table, &cs);
++	h->ops->clear_cs(&cs);
++
+ 	if (!new_rule)
+ 		return 1;
+ 
+-- 
+cgit v1.2.3
+

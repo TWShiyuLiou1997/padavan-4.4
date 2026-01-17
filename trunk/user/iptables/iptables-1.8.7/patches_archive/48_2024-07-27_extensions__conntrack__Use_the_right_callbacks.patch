@@ -1,0 +1,58 @@
+From bb2ee075d8a626f2249ef9507927fae155b24093 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Fri, 26 Jul 2024 13:41:52 +0200
+Subject: extensions: conntrack: Use the right callbacks
+
+These version-agnostic conntrack match aliases emulating the 'state'
+extension introduced by commit 0d70163162589 ("libxt_state: replace as
+an alias to xt_conntrack") had incompatible print and save callbacks
+assigned. These callbacks expected struct xt_state_info in match->data
+which is incompatible to any of the actual xt_conntrack_mtinfo* structs
+used.
+
+Fixes: b28d4dcc9f555 ("iptables: state match incompatibilty across versions")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_conntrack.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/extensions/libxt_conntrack.c b/extensions/libxt_conntrack.c
+index ffbc7467..ccbf731d 100644
+--- a/extensions/libxt_conntrack.c
++++ b/extensions/libxt_conntrack.c
+@@ -1502,8 +1502,8 @@ static struct xtables_match conntrack_mt_reg[] = {
+ 		.size          = XT_ALIGN(sizeof(struct xt_conntrack_mtinfo1)),
+ 		.userspacesize = XT_ALIGN(sizeof(struct xt_conntrack_mtinfo1)),
+ 		.help          = state_help,
+-		.print         = state_print,
+-		.save          = state_save,
++		.print         = conntrack1_mt4_print,
++		.save          = conntrack1_mt4_save,
+ 		.x6_parse      = state_ct1_parse,
+ 		.x6_options    = state_opts,
+ 	},
+@@ -1517,8 +1517,8 @@ static struct xtables_match conntrack_mt_reg[] = {
+ 		.size          = XT_ALIGN(sizeof(struct xt_conntrack_mtinfo2)),
+ 		.userspacesize = XT_ALIGN(sizeof(struct xt_conntrack_mtinfo2)),
+ 		.help          = state_help,
+-		.print         = state_print,
+-		.save          = state_save,
++		.print         = conntrack2_mt_print,
++		.save          = conntrack2_mt_save,
+ 		.x6_parse      = state_ct23_parse,
+ 		.x6_options    = state_opts,
+ 	},
+@@ -1532,8 +1532,8 @@ static struct xtables_match conntrack_mt_reg[] = {
+ 		.size          = XT_ALIGN(sizeof(struct xt_conntrack_mtinfo3)),
+ 		.userspacesize = XT_ALIGN(sizeof(struct xt_conntrack_mtinfo3)),
+ 		.help          = state_help,
+-		.print         = state_print,
+-		.save          = state_save,
++		.print         = conntrack3_mt_print,
++		.save          = conntrack3_mt_save,
+ 		.x6_parse      = state_ct23_parse,
+ 		.x6_options    = state_opts,
+ 		.xlate         = state_xlate,
+-- 
+cgit v1.2.3
+

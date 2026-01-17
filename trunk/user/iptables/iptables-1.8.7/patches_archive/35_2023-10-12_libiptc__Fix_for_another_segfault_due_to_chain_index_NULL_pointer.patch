@@ -1,0 +1,82 @@
+From e2d7ee9c49b582f399ad4ba2da2ee1b3e1f89620 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Thu, 12 Oct 2023 17:27:42 +0200
+Subject: libiptc: Fix for another segfault due to chain index NULL pointer
+
+Chain rename code missed to adjust the num_chains value which is used to
+calculate the number of chain index buckets to allocate during an index
+rebuild. So with the right number of chains present, the last chain in a
+middle bucket being renamed (and ending up in another bucket) triggers
+an index rebuild based on false data. The resulting NULL pointer index
+bucket then causes a segfault upon reinsertion.
+
+Closes: https://bugzilla.netfilter.org/show_bug.cgi?id=1713
+Fixes: 64ff47cde38e4 ("libiptc: fix chain rename bug in libiptc")
+---
+ .../shell/testcases/chain/0008rename-segfault2_0   | 32 ++++++++++++++++++++++
+ libiptc/libiptc.c                                  |  4 +++
+ 2 files changed, 36 insertions(+)
+ create mode 100755 iptables/tests/shell/testcases/chain/0008rename-segfault2_0
+
+diff --git a/iptables/tests/shell/testcases/chain/0008rename-segfault2_0 b/iptables/tests/shell/testcases/chain/0008rename-segfault2_0
+new file mode 100755
+index 00000000..bc473d25
+--- /dev/null
++++ b/iptables/tests/shell/testcases/chain/0008rename-segfault2_0
+@@ -0,0 +1,32 @@
++#!/bin/bash
++#
++# Another funny rename bug in libiptc:
++# If there is a chain index bucket with only a single chain in it and it is not
++# the last one and that chain is renamed, a chain index rebuild is triggered.
++# Since TC_RENAME_CHAIN missed to temporarily decrement num_chains value, an
++# extra index is allocated and remains NULL. The following insert of renamed
++# chain then segfaults.
++
++(
++	echo "*filter"
++	# first bucket
++	for ((i = 0; i < 40; i++)); do
++		echo ":chain-a-$i - [0:0]"
++	done
++	# second bucket
++	for ((i = 0; i < 40; i++)); do
++		echo ":chain-b-$i - [0:0]"
++	done
++	# third bucket, just make sure it exists
++	echo ":chain-c-0 - [0:0]"
++	echo "COMMIT"
++) | $XT_MULTI iptables-restore
++
++# rename all chains of the middle bucket
++(
++	echo "*filter"
++	for ((i = 0; i < 40; i++)); do
++		echo "-E chain-b-$i chain-d-$i"
++	done
++	echo "COMMIT"
++) | $XT_MULTI iptables-restore --noflush
+diff --git a/libiptc/libiptc.c b/libiptc/libiptc.c
+index e4750633..9712a363 100644
+--- a/libiptc/libiptc.c
++++ b/libiptc/libiptc.c
+@@ -2384,12 +2384,16 @@ int TC_RENAME_CHAIN(const IPT_CHAINLABEL oldname,
+ 		return 0;
+ 	}
+ 
++	handle->num_chains--;
++
+ 	/* This only unlinks "c" from the list, thus no free(c) */
+ 	iptcc_chain_index_delete_chain(c, handle);
+ 
+ 	/* Change the name of the chain */
+ 	strncpy(c->name, newname, sizeof(IPT_CHAINLABEL) - 1);
+ 
++	handle->num_chains++;
++
+ 	/* Insert sorted into to list again */
+ 	iptc_insert_chain(handle, c);
+ 
+-- 
+cgit v1.2.3
+

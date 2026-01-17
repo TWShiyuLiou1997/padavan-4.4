@@ -1,0 +1,35 @@
+From 43f78733059ecd28d8567d8205cab5ed62d93458 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Thu, 3 Aug 2023 17:59:03 +0200
+Subject: Revert "libiptc: fix wrong maptype of base chain counters on restore"
+
+This reverts commit 7c4d668c9c2ee007c82063b7fc784cbbf46b2ec4.
+
+The change can't be right: A simple rule append call will reset all
+built-in chains' counters. The old code works fine even given the
+mentioned "empty restore" use-case, at least if counters don't change on
+the fly in-kernel.
+
+Closes: https://bugzilla.netfilter.org/show_bug.cgi?id=912
+Fixes: 7c4d668c9c2ee ("libiptc: fix wrong maptype of base chain counters on restore")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ libiptc/libiptc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libiptc/libiptc.c b/libiptc/libiptc.c
+index f9b7779e..29ff356f 100644
+--- a/libiptc/libiptc.c
++++ b/libiptc/libiptc.c
+@@ -822,7 +822,7 @@ static int __iptcc_p_del_policy(struct xtc_handle *h, unsigned int num)
+ 
+ 		/* save counter and counter_map information */
+ 		h->chain_iterator_cur->counter_map.maptype =
+-						COUNTER_MAP_ZEROED;
++						COUNTER_MAP_NORMAL_MAP;
+ 		h->chain_iterator_cur->counter_map.mappos = num-1;
+ 		memcpy(&h->chain_iterator_cur->counters, &pr->entry->counters,
+ 			sizeof(h->chain_iterator_cur->counters));
+-- 
+cgit v1.2.3
+

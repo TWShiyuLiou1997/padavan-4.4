@@ -1,0 +1,128 @@
+From 18e334da7363ba186edb1700056e26ded27ca5ba Mon Sep 17 00:00:00 2001
+From: Alexander Mikhalitsyn <alexander.mikhalitsyn@virtuozzo.com>
+Date: Thu, 1 Apr 2021 16:47:07 +0300
+Subject: extensions: libxt_conntrack: use bitops for state negation
+
+Currently, state_xlate_print function prints statemask as comma-separated sequence of enabled
+statemask flags. But if we have inverted conntrack ctstate condition then we have to use more
+complex expression because nft not supports syntax like "ct state != related,established".
+
+Reproducer:
+$ iptables -A INPUT -d 127.0.0.1/32 -p tcp -m conntrack ! --ctstate RELATED,ESTABLISHED -j DROP
+$ nft list ruleset
+...
+meta l4proto tcp ip daddr 127.0.0.1 ct state != related,established counter packets 0 bytes 0 drop
+...
+
+it will fail if we try to load this rule:
+$ nft -f nft_test
+../nft_test:6:97-97: Error: syntax error, unexpected comma, expecting newline or semicolon
+
+Cc: Florian Westphal <fw@strlen.de>
+Signed-off-by: Alexander Mikhalitsyn <alexander.mikhalitsyn@virtuozzo.com>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ extensions/libxt_conntrack.c      | 38 +++++++++++++++++++++++++-------------
+ extensions/libxt_conntrack.txlate |  5 ++++-
+ 2 files changed, 29 insertions(+), 14 deletions(-)
+
+diff --git a/extensions/libxt_conntrack.c b/extensions/libxt_conntrack.c
+index 7734509c..91f9e4aa 100644
+--- a/extensions/libxt_conntrack.c
++++ b/extensions/libxt_conntrack.c
+@@ -1148,30 +1148,43 @@ static void state_save(const void *ip, const struct xt_entry_match *match)
+ 	state_print_state(sinfo->statemask);
+ }
+ 
+-static void state_xlate_print(struct xt_xlate *xl, unsigned int statemask)
++static void state_xlate_print(struct xt_xlate *xl, unsigned int statemask, int inverted)
+ {
+ 	const char *sep = "";
++	int one_flag_set;
++
++	one_flag_set = !(statemask & (statemask - 1));
++
++	if (inverted && !one_flag_set)
++		xt_xlate_add(xl, "& (");
++	else if (inverted)
++		xt_xlate_add(xl, "& ");
+ 
+ 	if (statemask & XT_CONNTRACK_STATE_INVALID) {
+ 		xt_xlate_add(xl, "%s%s", sep, "invalid");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
+ 	if (statemask & XT_CONNTRACK_STATE_BIT(IP_CT_NEW)) {
+ 		xt_xlate_add(xl, "%s%s", sep, "new");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
+ 	if (statemask & XT_CONNTRACK_STATE_BIT(IP_CT_RELATED)) {
+ 		xt_xlate_add(xl, "%s%s", sep, "related");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
+ 	if (statemask & XT_CONNTRACK_STATE_BIT(IP_CT_ESTABLISHED)) {
+ 		xt_xlate_add(xl, "%s%s", sep, "established");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
+ 	if (statemask & XT_CONNTRACK_STATE_UNTRACKED) {
+ 		xt_xlate_add(xl, "%s%s", sep, "untracked");
+-		sep = ",";
++		sep = inverted && !one_flag_set ? "|" : ",";
+ 	}
++
++	if (inverted && !one_flag_set)
++		xt_xlate_add(xl, ") == 0");
++	else if (inverted)
++		xt_xlate_add(xl, " == 0");
+ }
+ 
+ static int state_xlate(struct xt_xlate *xl,
+@@ -1180,9 +1193,9 @@ static int state_xlate(struct xt_xlate *xl,
+ 	const struct xt_conntrack_mtinfo3 *sinfo =
+ 		(const void *)params->match->data;
+ 
+-	xt_xlate_add(xl, "ct state %s", sinfo->invert_flags & XT_CONNTRACK_STATE ?
+-					"!= " : "");
+-	state_xlate_print(xl, sinfo->state_mask);
++	xt_xlate_add(xl, "ct state ");
++	state_xlate_print(xl, sinfo->state_mask,
++			  sinfo->invert_flags & XT_CONNTRACK_STATE);
+ 	xt_xlate_add(xl, " ");
+ 	return 1;
+ }
+@@ -1256,10 +1269,9 @@ static int _conntrack3_mt_xlate(struct xt_xlate *xl,
+ 				     sinfo->state_mask & XT_CONNTRACK_STATE_SNAT ? "snat" : "dnat");
+ 			space = " ";
+ 		} else {
+-			xt_xlate_add(xl, "%sct state %s", space,
+-				     sinfo->invert_flags & XT_CONNTRACK_STATE ?
+-				     "!= " : "");
+-			state_xlate_print(xl, sinfo->state_mask);
++			xt_xlate_add(xl, "%sct state ", space);
++			state_xlate_print(xl, sinfo->state_mask,
++					  sinfo->invert_flags & XT_CONNTRACK_STATE);
+ 			space = " ";
+ 		}
+ 	}
+diff --git a/extensions/libxt_conntrack.txlate b/extensions/libxt_conntrack.txlate
+index d374f8a0..5ab85b17 100644
+--- a/extensions/libxt_conntrack.txlate
++++ b/extensions/libxt_conntrack.txlate
+@@ -2,7 +2,10 @@ iptables-translate -t filter -A INPUT -m conntrack --ctstate NEW,RELATED -j ACCE
+ nft add rule ip filter INPUT ct state new,related counter accept
+ 
+ ip6tables-translate -t filter -A INPUT -m conntrack ! --ctstate NEW,RELATED -j ACCEPT
+-nft add rule ip6 filter INPUT ct state != new,related counter accept
++nft add rule ip6 filter INPUT ct state & (new|related) == 0 counter accept
++
++ip6tables-translate -t filter -A INPUT -m conntrack ! --ctstate NEW -j ACCEPT
++nft add rule ip6 filter INPUT ct state & new == 0 counter accept
+ 
+ iptables-translate -t filter -A INPUT -m conntrack --ctproto UDP -j ACCEPT
+ nft add rule ip filter INPUT ct original protocol 17 counter accept
+-- 
+cgit v1.2.3
+

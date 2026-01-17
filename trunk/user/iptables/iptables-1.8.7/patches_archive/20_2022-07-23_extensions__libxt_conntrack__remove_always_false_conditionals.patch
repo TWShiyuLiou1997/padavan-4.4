@@ -1,0 +1,60 @@
+From e88085ac41b4c962e1d85dcc8dc6fa0d1f80dc12 Mon Sep 17 00:00:00 2001
+From: Florian Westphal <fw@strlen.de>
+Date: Sat, 23 Jul 2022 20:25:49 +0200
+Subject: extensions: libxt_conntrack: remove always-false conditionals
+
+libxt_conntrack.c:1292: warning: the comparison will always evaluate as
+false for the address of origsrc_addr will never be NULL [-Waddress]
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ extensions/libxt_conntrack.c | 12 ------------
+ 1 file changed, 12 deletions(-)
+
+diff --git a/extensions/libxt_conntrack.c b/extensions/libxt_conntrack.c
+index 234085c5..08dba42d 100644
+--- a/extensions/libxt_conntrack.c
++++ b/extensions/libxt_conntrack.c
+@@ -1289,9 +1289,6 @@ static int _conntrack3_mt_xlate(struct xt_xlate *xl,
+ 	}
+ 
+ 	if (sinfo->match_flags & XT_CONNTRACK_ORIGSRC) {
+-		if (&sinfo->origsrc_addr == 0L)
+-			return 0;
+-
+ 		xt_xlate_add(xl, "%sct original saddr %s", space,
+ 			     sinfo->invert_flags & XT_CONNTRACK_ORIGSRC ?
+ 			     "!= " : "");
+@@ -1301,9 +1298,6 @@ static int _conntrack3_mt_xlate(struct xt_xlate *xl,
+ 	}
+ 
+ 	if (sinfo->match_flags & XT_CONNTRACK_ORIGDST) {
+-		if (&sinfo->origdst_addr == 0L)
+-			return 0;
+-
+ 		xt_xlate_add(xl, "%sct original daddr %s", space,
+ 			     sinfo->invert_flags & XT_CONNTRACK_ORIGDST ?
+ 			     "!= " : "");
+@@ -1313,9 +1307,6 @@ static int _conntrack3_mt_xlate(struct xt_xlate *xl,
+ 	}
+ 
+ 	if (sinfo->match_flags & XT_CONNTRACK_REPLSRC) {
+-		if (&sinfo->replsrc_addr == 0L)
+-			return 0;
+-
+ 		xt_xlate_add(xl, "%sct reply saddr %s", space,
+ 			     sinfo->invert_flags & XT_CONNTRACK_REPLSRC ?
+ 			     "!= " : "");
+@@ -1325,9 +1316,6 @@ static int _conntrack3_mt_xlate(struct xt_xlate *xl,
+ 	}
+ 
+ 	if (sinfo->match_flags & XT_CONNTRACK_REPLDST) {
+-		if (&sinfo->repldst_addr == 0L)
+-			return 0;
+-
+ 		xt_xlate_add(xl, "%sct reply daddr %s", space,
+ 			     sinfo->invert_flags & XT_CONNTRACK_REPLDST ?
+ 			     "!= " : "");
+-- 
+cgit v1.2.3
+

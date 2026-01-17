@@ -1,0 +1,30 @@
+From 7b7c0936303abd0a7b26c8bc1382136265815677 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Wed, 31 Jul 2024 23:02:23 +0200
+Subject: ebtables: Zero freed pointers in ebt_cs_clean()
+
+Trying to recycle an iptables_command_state object by calling first
+clear_cs then init_cs callbacks causes invalid data accesses with
+ebtables otherwise.
+
+Fixes: fe97f60e5d2a9 ("ebtables-compat: add watchers support")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/nft-bridge.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/iptables/nft-bridge.c b/iptables/nft-bridge.c
+index 0f85e218..f75a13fb 100644
+--- a/iptables/nft-bridge.c
++++ b/iptables/nft-bridge.c
+@@ -46,6 +46,7 @@ void ebt_cs_clean(struct iptables_command_state *cs)
+ 		free(m);
+ 		m = nm;
+ 	}
++	cs->match_list = NULL;
+ 
+ 	if (cs->target) {
+ 		free(cs->target->t);
+-- 
+cgit v1.2.3
+

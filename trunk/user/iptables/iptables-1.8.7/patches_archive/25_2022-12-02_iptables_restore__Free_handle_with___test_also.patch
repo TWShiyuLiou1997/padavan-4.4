@@ -1,0 +1,46 @@
+From 18880dbde615449d00a3e38f3713a19d4566258e Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Fri, 25 Nov 2022 19:24:38 +0100
+Subject: iptables-restore: Free handle with --test also
+
+When running 'iptables-restore -t', valgrind reports:
+
+1,496 (160 direct, 1,336 indirect) bytes in 1 blocks are definitely lost in loss record 4 of 4
+   at 0x48417E5: malloc (vg_replace_malloc.c:381)
+   by 0x4857A46: alloc_handle (libiptc.c:1279)
+   by 0x4857A46: iptc_init (libiptc.c:1342)
+   by 0x1167CE: create_handle (iptables-restore.c:72)
+   by 0x1167CE: ip46tables_restore_main (iptables-restore.c:229)
+   by 0x116DAE: iptables_restore_main (iptables-restore.c:388)
+   by 0x49A2349: (below main) (in /lib64/libc.so.6)
+
+Free the handle pointer before parsing the next table.
+
+Fixes: 1c9015b2cb483 ("libiptc: remove indirections")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/iptables-restore.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/iptables/iptables-restore.c b/iptables/iptables-restore.c
+index 05661bf6..6f7ddf93 100644
+--- a/iptables/iptables-restore.c
++++ b/iptables/iptables-restore.c
+@@ -185,12 +185,12 @@ ip46tables_restore_main(const struct iptables_restore_cb *cb,
+ 			if (!testing) {
+ 				DEBUGP("Calling commit\n");
+ 				ret = cb->ops->commit(handle);
+-				cb->ops->free(handle);
+-				handle = NULL;
+ 			} else {
+ 				DEBUGP("Not calling commit, testing\n");
+ 				ret = 1;
+ 			}
++			cb->ops->free(handle);
++			handle = NULL;
+ 
+ 			/* Done with the current table, release the lock. */
+ 			if (lock >= 0) {
+-- 
+cgit v1.2.3
+

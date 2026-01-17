@@ -1,0 +1,53 @@
+From 8696f659eadd58505469841a3af16ad2c830e8e5 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Thu, 20 Jun 2024 18:17:16 +0200
+Subject: extensions: recent: Fix format string for unsigned values
+
+Both fields 'seconds' and 'hit_count' are unsigned, use '%u'
+accordingly. While being at it, also fix coding-style in those lines.
+
+Basically a day-1 bug, have Fixes: point at a reasonably old commit.
+
+Fixes: af1660fe0e88c ("Move libipt_recent to libxt_recent")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_recent.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/extensions/libxt_recent.c b/extensions/libxt_recent.c
+index 055ae350..0221d446 100644
+--- a/extensions/libxt_recent.c
++++ b/extensions/libxt_recent.c
+@@ -193,10 +193,12 @@ static void recent_print(const void *ip, const struct xt_entry_match *match,
+ 		printf(" UPDATE");
+ 	if (info->check_set & XT_RECENT_REMOVE)
+ 		printf(" REMOVE");
+-	if(info->seconds) printf(" seconds: %d", info->seconds);
++	if (info->seconds)
++		printf(" seconds: %u", info->seconds);
+ 	if (info->check_set & XT_RECENT_REAP)
+ 		printf(" reap");
+-	if(info->hit_count) printf(" hit_count: %d", info->hit_count);
++	if (info->hit_count)
++		printf(" hit_count: %u", info->hit_count);
+ 	if (info->check_set & XT_RECENT_TTL)
+ 		printf(" TTL-Match");
+ 	printf(" name: %s", info->name);
+@@ -233,10 +235,12 @@ static void recent_save(const void *ip, const struct xt_entry_match *match,
+ 		printf(" --update");
+ 	if (info->check_set & XT_RECENT_REMOVE)
+ 		printf(" --remove");
+-	if(info->seconds) printf(" --seconds %d", info->seconds);
++	if (info->seconds)
++		printf(" --seconds %u", info->seconds);
+ 	if (info->check_set & XT_RECENT_REAP)
+ 		printf(" --reap");
+-	if(info->hit_count) printf(" --hitcount %d", info->hit_count);
++	if (info->hit_count)
++		printf(" --hitcount %u", info->hit_count);
+ 	if (info->check_set & XT_RECENT_TTL)
+ 		printf(" --rttl");
+ 	printf(" --name %s",info->name);
+-- 
+cgit v1.2.3
+

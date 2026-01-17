@@ -1,0 +1,30 @@
+From 4d9453233538200e9663c6bd0c2df09e1671b5f4 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Thu, 13 Jul 2023 18:32:02 +0200
+Subject: iptables-restore: Drop dead code
+
+Handle initialization is guarded by 'in_table' boolean, so there can't
+be a handle already (because the branch which unsets 'in_table' also
+frees the handle).
+
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/iptables-restore.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/iptables/iptables-restore.c b/iptables/iptables-restore.c
+index f11b2dc2..53029738 100644
+--- a/iptables/iptables-restore.c
++++ b/iptables/iptables-restore.c
+@@ -223,8 +223,6 @@ ip46tables_restore_main(const struct iptables_restore_cb *cb,
+ 				}
+ 				continue;
+ 			}
+-			if (handle)
+-				cb->ops->free(handle);
+ 
+ 			handle = create_handle(cb, table);
+ 			if (noflush == 0) {
+-- 
+cgit v1.2.3
+

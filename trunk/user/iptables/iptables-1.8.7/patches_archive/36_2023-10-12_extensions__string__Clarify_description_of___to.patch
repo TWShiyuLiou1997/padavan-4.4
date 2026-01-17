@@ -1,0 +1,37 @@
+From 920ece2b392fb83bd26416e0e6f8f6a847aacbaa Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Thu, 12 Oct 2023 17:54:53 +0200
+Subject: extensions: string: Clarify description of --to
+
+String match indeed returns a match as long as the given pattern starts
+in the range of --from and --to, update the text accordingly.
+Also add a note regarding fragment boundaries.
+
+Closes: https://bugzilla.netfilter.org/show_bug.cgi?id=1707
+---
+ extensions/libxt_string.man | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/extensions/libxt_string.man b/extensions/libxt_string.man
+index 2a470ece..efdda492 100644
+--- a/extensions/libxt_string.man
++++ b/extensions/libxt_string.man
+@@ -7,9 +7,13 @@ Select the pattern matching strategy. (bm = Boyer-Moore, kmp = Knuth-Pratt-Morri
+ Set the offset from which it starts looking for any matching. If not passed, default is 0.
+ .TP
+ \fB\-\-to\fP \fIoffset\fP
+-Set the offset up to which should be scanned. That is, byte \fIoffset\fP-1
+-(counting from 0) is the last one that is scanned.
++Set the offset up to which should be scanned. If the pattern does not start
++within this offset, it is not considered a match.
+ If not passed, default is the packet size.
++A second function of this parameter is instructing the kernel how much data
++from the packet should be provided. With non-linear skbuffs (e.g. due to
++fragmentation), a pattern extending past this offset may not be found. Also see
++the related note below about Boyer-Moore algorithm in these cases.
+ .TP
+ [\fB!\fP] \fB\-\-string\fP \fIpattern\fP
+ Matches the given pattern.
+-- 
+cgit v1.2.3
+

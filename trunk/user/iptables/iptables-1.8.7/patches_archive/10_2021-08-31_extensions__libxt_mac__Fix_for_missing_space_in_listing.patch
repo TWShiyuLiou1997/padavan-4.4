@@ -1,0 +1,38 @@
+From cf410aa6604d92faf2a2a5051ec18b7d9482e752 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Mon, 30 Aug 2021 23:48:54 +0200
+Subject: extensions: libxt_mac: Fix for missing space in listing
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Listing the extension using 'iptables -L', there was no space between
+'MAC' and the following Address.
+
+Reported-by: Adam Wójcik <a.wojcik@hyp.home.pl>
+Fixes: 1bdb5535f561a ("libxtables: Extend MAC address printing/parsing support")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_mac.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extensions/libxt_mac.c b/extensions/libxt_mac.c
+index b90eef20..55891b2b 100644
+--- a/extensions/libxt_mac.c
++++ b/extensions/libxt_mac.c
+@@ -42,10 +42,10 @@ mac_print(const void *ip, const struct xt_entry_match *match, int numeric)
+ {
+ 	const struct xt_mac_info *info = (void *)match->data;
+ 
+-	printf(" MAC");
++	printf(" MAC ");
+ 
+ 	if (info->invert)
+-		printf(" !");
++		printf("! ");
+ 
+ 	xtables_print_mac(info->srcaddr);
+ }
+-- 
+cgit v1.2.3
+

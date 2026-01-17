@@ -1,0 +1,50 @@
+From 5b5430d627bbc227a2d51d4312c371f2015834c6 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Tue, 1 Aug 2023 23:28:20 +0200
+Subject: extensions: libipt_icmp: Fix confusion between 255/255 and any
+
+Per definition, ICMP type "any" is type 255 and the full range of codes
+(0-255). Save callback though ignored the actual code values, printing
+"any" for every type 255 match. This at least confuses users as they
+can't find their rule added as '--icmp-type 255/255' anymore.
+
+It is not entirely clear what the fixed commit was trying to establish,
+but the save output is certainly not correct (especially since print
+callback gets things right).
+
+Reported-by: Amelia Downs <adowns@vmware.com>
+Closes: https://bugzilla.netfilter.org/show_bug.cgi?id=1600
+Fixes: fc9237da4e845 ("Fix '-p icmp -m icmp' issue (Closes: #37)")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libipt_icmp.c | 3 ++-
+ extensions/libipt_icmp.t | 2 ++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/extensions/libipt_icmp.c b/extensions/libipt_icmp.c
+index b0318aeb..171b3b39 100644
+--- a/extensions/libipt_icmp.c
++++ b/extensions/libipt_icmp.c
+@@ -108,7 +108,8 @@ static void icmp_save(const void *ip, const struct xt_entry_match *match)
+ 		printf(" !");
+ 
+ 	/* special hack for 'any' case */
+-	if (icmp->type == 0xFF) {
++	if (icmp->type == 0xFF &&
++	    icmp->code[0] == 0 && icmp->code[1] == 0xFF) {
+ 		printf(" --icmp-type any");
+ 	} else {
+ 		printf(" --icmp-type %u", icmp->type);
+diff --git a/extensions/libipt_icmp.t b/extensions/libipt_icmp.t
+index f4ba65c2..ce4a33f9 100644
+--- a/extensions/libipt_icmp.t
++++ b/extensions/libipt_icmp.t
+@@ -13,3 +13,5 @@
+ # we accept "iptables -I INPUT -p tcp -m tcp", why not this below?
+ # ERROR: cannot load: iptables -A INPUT -p icmp -m icmp
+ # -p icmp -m icmp;=;OK
++-p icmp -m icmp --icmp-type 255/255;=;OK
++-p icmp -m icmp --icmp-type 255/0:255;-p icmp -m icmp --icmp-type any;OK
+-- 
+cgit v1.2.3
+

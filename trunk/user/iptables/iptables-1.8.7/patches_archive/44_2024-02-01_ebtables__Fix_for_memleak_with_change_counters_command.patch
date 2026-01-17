@@ -1,0 +1,31 @@
+From 11c77ed471f2d8a6dc60c17aef1e1a3b52ff3591 Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Wed, 31 Jan 2024 22:45:07 +0100
+Subject: ebtables: Fix for memleak with change counters command
+
+Just like with check command, change counters command creates a
+temporary rule from rulespec on command line for a search by spec in
+rule cache. It is not used anymore afterwards, so nft_cmd_free() should
+free it.
+
+Fixes: f340b7b6816be ("ebtables: Implement --change-counters command")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/nft-cmd.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/iptables/nft-cmd.c b/iptables/nft-cmd.c
+index 8372d171..b38da9bd 100644
+--- a/iptables/nft-cmd.c
++++ b/iptables/nft-cmd.c
+@@ -65,6 +65,7 @@ void nft_cmd_free(struct nft_cmd *cmd)
+ 	switch (cmd->command) {
+ 	case NFT_COMPAT_RULE_CHECK:
+ 	case NFT_COMPAT_RULE_DELETE:
++	case NFT_COMPAT_RULE_CHANGE_COUNTERS:
+ 		if (cmd->obj.rule)
+ 			nftnl_rule_free(cmd->obj.rule);
+ 		break;
+-- 
+cgit v1.2.3
+

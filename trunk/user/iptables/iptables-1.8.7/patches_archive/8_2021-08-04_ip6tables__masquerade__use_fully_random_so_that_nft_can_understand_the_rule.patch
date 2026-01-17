@@ -1,0 +1,57 @@
+From 943fbf3e1850ae1f52f29c2f4f2aca399779b368 Mon Sep 17 00:00:00 2001
+From: Pavel Tikhomirov <ptikhomirov@virtuozzo.com>
+Date: Wed, 4 Aug 2021 18:50:57 +0300
+Subject: ip6tables: masquerade: use fully-random so that nft can understand
+ the rule
+
+Here is the problem:
+
+[]# nft -v
+nftables v0.9.8 (E.D.S.)
+[]# iptables-nft -v
+iptables v1.8.7 (nf_tables): no command specified
+Try `iptables -h' or 'iptables --help' for more information.
+[]# nft flush ruleset
+[]# ip6tables-nft -t nat -A POSTROUTING  -j MASQUERADE --random-full
+[]# nft list ruleset
+table ip6 nat {
+	chain POSTROUTING {
+		type nat hook postrouting priority srcnat; policy accept;
+		counter packets 0 bytes 0 masquerade  random-fully
+	}
+}
+[]# nft list ruleset > /tmp/ruleset
+[]# nft flush ruleset
+[]# nft -f /tmp/ruleset
+/tmp/ruleset:4:54-54: Error: syntax error, unexpected newline
+		counter packets 0 bytes 0 masquerade  random-fully
+
+That's because nft list ruleset saves "random-fully" which is wrong
+format for nft -f, right should be "fully-random".
+
+We face this problem because we run k8s in Virtuozzo container, and k8s
+creates those "random-fully" rules by iptables(nft) and then CRIU can't
+restore those rules using nft.
+
+Signed-off-by: Pavel Tikhomirov <ptikhomirov@virtuozzo.com>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ extensions/libip6t_MASQUERADE.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extensions/libip6t_MASQUERADE.c b/extensions/libip6t_MASQUERADE.c
+index f92760fa..f28f071b 100644
+--- a/extensions/libip6t_MASQUERADE.c
++++ b/extensions/libip6t_MASQUERADE.c
+@@ -163,7 +163,7 @@ static int MASQUERADE_xlate(struct xt_xlate *xl,
+ 
+ 	xt_xlate_add(xl, " ");
+ 	if (r->flags & NF_NAT_RANGE_PROTO_RANDOM_FULLY)
+-		xt_xlate_add(xl, "random-fully ");
++		xt_xlate_add(xl, "fully-random ");
+ 
+ 	return 1;
+ }
+-- 
+cgit v1.2.3
+

@@ -1,0 +1,147 @@
+From d6eb6a9fd3878ce4fa01f8d4127f1735988bd07b Mon Sep 17 00:00:00 2001
+From: Phil Sutter <phil@nwl.cc>
+Date: Wed, 25 Jan 2023 01:51:43 +0100
+Subject: Proper fix for "unknown argument" error message
+
+While commit 1b8210f848631 kind of fixed the corner-case of invalid
+short-options packed with others, it broke error reporting for
+long-options. Revert it and deploy a proper solution:
+
+When passing an invalid short-option, e.g. 'iptables -vaL', getopt_long
+sets the variable 'optopt' to the invalid character's value. Use it for
+reporting instead of optind if set.
+
+To distinguish between invalid options and missing option arguments,
+ebtables-translate optstring needs adjustment.
+
+Fixes: 1b8210f848631 ("ebtables: Fix error message for invalid parameters")
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ .../shell/testcases/iptables/0009-unknown-arg_0    | 31 ++++++++++++++++++++++
+ iptables/xshared.c                                 |  9 ++++---
+ iptables/xtables-eb-translate.c                    |  8 ++----
+ iptables/xtables-eb.c                              | 17 +++++++-----
+ 4 files changed, 50 insertions(+), 15 deletions(-)
+ create mode 100755 iptables/tests/shell/testcases/iptables/0009-unknown-arg_0
+
+diff --git a/iptables/tests/shell/testcases/iptables/0009-unknown-arg_0 b/iptables/tests/shell/testcases/iptables/0009-unknown-arg_0
+new file mode 100755
+index 00000000..ac6e7439
+--- /dev/null
++++ b/iptables/tests/shell/testcases/iptables/0009-unknown-arg_0
+@@ -0,0 +1,31 @@
++#!/bin/bash
++
++rc=0
++
++check() {
++	local cmd="$1"
++	local msg="$2"
++
++	$XT_MULTI $cmd 2>&1 | grep -q "$msg" || {
++		echo "cmd: $XT_MULTI $1"
++		echo "exp: $msg"
++		echo "res: $($XT_MULTI $cmd 2>&1)"
++		rc=1
++	}
++}
++
++cmds="iptables ip6tables"
++[[ $XT_MULTI == *xtables-nft-multi ]] && {
++	cmds+=" ebtables"
++	cmds+=" iptables-translate"
++	cmds+=" ip6tables-translate"
++	cmds+=" ebtables-translate"
++}
++
++for cmd in $cmds; do
++	check "${cmd} --foo" 'unknown option "--foo"'
++	check "${cmd} -A" 'option "-A" requires an argument'
++	check "${cmd} -aL" 'unknown option "-a"'
++done
++
++exit $rc
+diff --git a/iptables/xshared.c b/iptables/xshared.c
+index f93529b1..ac51fac5 100644
+--- a/iptables/xshared.c
++++ b/iptables/xshared.c
+@@ -192,9 +192,12 @@ static int command_default(struct iptables_command_state *cs,
+ 	if (cs->c == ':')
+ 		xtables_error(PARAMETER_PROBLEM, "option \"%s\" "
+ 		              "requires an argument", cs->argv[optind-1]);
+-	if (cs->c == '?')
+-		xtables_error(PARAMETER_PROBLEM, "unknown option "
+-			      "\"%s\"", cs->argv[optind-1]);
++	if (cs->c == '?') {
++		char optoptstr[3] = {'-', optopt, '\0'};
++
++		xtables_error(PARAMETER_PROBLEM, "unknown option \"%s\"",
++			      optopt ? optoptstr : cs->argv[optind - 1]);
++	}
+ 	xtables_error(PARAMETER_PROBLEM, "Unknown arg \"%s\"", optarg);
+ }
+ 
+diff --git a/iptables/xtables-eb-translate.c b/iptables/xtables-eb-translate.c
+index 13b6b864..0c352720 100644
+--- a/iptables/xtables-eb-translate.c
++++ b/iptables/xtables-eb-translate.c
+@@ -201,7 +201,7 @@ static int do_commandeb_xlate(struct nft_handle *h, int argc, char *argv[], char
+ 	printf("nft ");
+ 	/* Getopt saves the day */
+ 	while ((c = getopt_long(argc, argv,
+-	   "-A:D:I:N:E:X::L::Z::F::P:Vhi:o:j:c:p:s:d:t:M:", opts, NULL)) != -1) {
++	   "-:A:D:I:N:E:X::L::Z::F::P:Vhi:o:j:c:p:s:d:t:M:", opts, NULL)) != -1) {
+ 		cs.c = c;
+ 		switch (c) {
+ 		case 'A': /* Add a rule */
+@@ -491,11 +491,7 @@ print_zero:
+ 			continue;
+ 		default:
+ 			ebt_check_inverse2(optarg, argc, argv);
+-
+-			if (ebt_command_default(&cs))
+-				xtables_error(PARAMETER_PROBLEM,
+-					      "Unknown argument: '%s'",
+-					      argv[optind - 1]);
++			ebt_command_default(&cs);
+ 
+ 			if (command != 'A' && command != 'I' &&
+ 			    command != 'D')
+diff --git a/iptables/xtables-eb.c b/iptables/xtables-eb.c
+index 7214a767..412b5ccc 100644
+--- a/iptables/xtables-eb.c
++++ b/iptables/xtables-eb.c
+@@ -640,7 +640,16 @@ int ebt_command_default(struct iptables_command_state *cs)
+ 			return 0;
+ 		}
+ 	}
+-	return 1;
++	if (cs->c == ':')
++		xtables_error(PARAMETER_PROBLEM, "option \"%s\" "
++		              "requires an argument", cs->argv[optind - 1]);
++	if (cs->c == '?') {
++		char optoptstr[3] = {'-', optopt, '\0'};
++
++		xtables_error(PARAMETER_PROBLEM, "unknown option \"%s\"",
++			      optopt ? optoptstr : cs->argv[optind - 1]);
++	}
++	xtables_error(PARAMETER_PROBLEM, "Unknown arg \"%s\"", optarg);
+ }
+ 
+ int nft_init_eb(struct nft_handle *h, const char *pname)
+@@ -1084,11 +1093,7 @@ print_zero:
+ 			continue;
+ 		default:
+ 			ebt_check_inverse2(optarg, argc, argv);
+-
+-			if (ebt_command_default(&cs))
+-				xtables_error(PARAMETER_PROBLEM,
+-					      "Unknown argument: '%s'",
+-					      argv[optind]);
++			ebt_command_default(&cs);
+ 
+ 			if (command != 'A' && command != 'I' &&
+ 			    command != 'D' && command != 'C' && command != 14)
+-- 
+cgit v1.2.3
+

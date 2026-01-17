@@ -1,0 +1,38 @@
+From f0d02998883d2efcb316cd6f524e2f7b3c4d055b Mon Sep 17 00:00:00 2001
+From: Jeremy Sowden <jeremy@azazel.net>
+Date: Fri, 1 Oct 2021 18:41:39 +0100
+Subject: extensions: libxt_NFLOG: fix `--nflog-prefix` Python test-cases
+
+The `iptables-save` includes an extra space between `--nflog-prefix` and
+the prefix.
+
+The maximum length of prefixes includes the trailing NUL character.
+
+NFLOG silently truncates prefixes which exceed the maximum length.
+
+Signed-off-by: Jeremy Sowden <jeremy@azazel.net>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+---
+ extensions/libxt_NFLOG.t | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/extensions/libxt_NFLOG.t b/extensions/libxt_NFLOG.t
+index eefb058b..13bbf2bf 100644
+--- a/extensions/libxt_NFLOG.t
++++ b/extensions/libxt_NFLOG.t
+@@ -14,10 +14,8 @@
+ -j NFLOG --nflog-size 4294967295;=;OK
+ -j NFLOG --nflog-size 4294967296;;FAIL
+ -j NFLOG --nflog-size -1;;FAIL
+-# ERROR: cannot find: iptables -I INPUT -j NFLOG --nflog-prefix  xxxxxx [...]
+-# -j NFLOG --nflog-prefix xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;=;OK
+-# ERROR: should fail: iptables -A INPUT -j NFLOG --nflog-prefix  xxxxxxx [...]
+-#  -j NFLOG --nflog-prefix xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;;FAIL
++-j NFLOG --nflog-prefix  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;=;OK
++-j NFLOG --nflog-prefix  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;-j NFLOG --nflog-prefix  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;OK
+ -j NFLOG --nflog-threshold 1;=;OK
+ # ERROR: line 13 (should fail: iptables -A INPUT -j NFLOG --nflog-threshold 0
+ # -j NFLOG --nflog-threshold 0;;FAIL
+-- 
+cgit v1.2.3
+

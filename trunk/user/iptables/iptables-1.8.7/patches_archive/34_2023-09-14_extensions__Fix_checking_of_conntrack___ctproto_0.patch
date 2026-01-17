@@ -1,0 +1,91 @@
+From 2e704f6ddd6d056e360f3d9c11e8b6c56a20cf23 Mon Sep 17 00:00:00 2001
+From: Quentin Armitage <quentin@armitage.org.uk>
+Date: Sat, 23 Nov 2013 08:41:58 +0000
+Subject: extensions: Fix checking of conntrack --ctproto 0
+
+There are three issues in the code:
+1) the check (sinfo->invflags & XT_INV_PROTO) is using the wrong mask
+2) in conntrack_mt_parse it is testing (info->invert_flags &
+   XT_INV_PROTO) before the invert bit has been set.
+3) the sense of the error message is the wrong way round
+
+1) To get the error, ! -ctstatus XXX has to be specified, since
+   XT_INV_PROTO == XT_CONNTRACK_STATUS e.g.
+   | iptables -I CHAIN -m conntrack ! --ctstatus ASSURED --ctproto 0 ...
+
+3) Unlike --proto 0 (where 0 means all protocols), in the conntrack
+   match --ctproto 0 appears to mean protocol 0, which can never be.
+   Therefore --ctproto 0 could never match and ! --ctproto 0 will always
+   match. Both of these should be rejected, since the user clearly
+   cannot be intending what was specified.
+
+The attached patch resolves the issue, and also produces an error
+message if --ctproto 0 is specified (as well as ! --ctproto 0 ), since
+--ctproto 0 will never match, and ! --ctproto 0 will always match.
+
+[Phil: - Added Fixes: tag - it's a day 1 bug
+       - Copied patch description from Bugzilla
+       - Reorganized changes to reduce diff
+       - Added test cases]
+
+Closes: https://bugzilla.netfilter.org/show_bug.cgi?id=874
+Fixes: 5054e85be3068 ("general conntrack match module userspace support files")
+Signed-off-by: Quentin Armitage <quentin@armitage.org.uk>
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ extensions/libxt_conntrack.c | 17 ++++++++---------
+ extensions/libxt_conntrack.t |  2 ++
+ 2 files changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/extensions/libxt_conntrack.c b/extensions/libxt_conntrack.c
+index 09548c29..ffbc7467 100644
+--- a/extensions/libxt_conntrack.c
++++ b/extensions/libxt_conntrack.c
+@@ -346,14 +346,13 @@ static void conntrack_parse(struct xt_option_call *cb)
+ 			sinfo->invflags |= XT_CONNTRACK_STATE;
+ 		break;
+ 	case O_CTPROTO:
++		if (cb->val.protocol == 0)
++			xtables_error(PARAMETER_PROBLEM, cb->invert ?
++				      "condition would always match protocol" :
++				      "rule would never match protocol");
+ 		sinfo->tuple[IP_CT_DIR_ORIGINAL].dst.protonum = cb->val.protocol;
+ 		if (cb->invert)
+ 			sinfo->invflags |= XT_CONNTRACK_PROTO;
+-		if (sinfo->tuple[IP_CT_DIR_ORIGINAL].dst.protonum == 0
+-		    && (sinfo->invflags & XT_INV_PROTO))
+-			xtables_error(PARAMETER_PROBLEM,
+-				   "rule would never match protocol");
+-
+ 		sinfo->flags |= XT_CONNTRACK_PROTO;
+ 		break;
+ 	case O_CTORIGSRC:
+@@ -411,11 +410,11 @@ static void conntrack_mt_parse(struct xt_option_call *cb, uint8_t rev)
+ 			info->invert_flags |= XT_CONNTRACK_STATE;
+ 		break;
+ 	case O_CTPROTO:
++		if (cb->val.protocol == 0)
++			xtables_error(PARAMETER_PROBLEM, cb->invert ?
++				      "conntrack: condition would always match protocol" :
++				      "conntrack: rule would never match protocol");
+ 		info->l4proto = cb->val.protocol;
+-		if (info->l4proto == 0 && (info->invert_flags & XT_INV_PROTO))
+-			xtables_error(PARAMETER_PROBLEM, "conntrack: rule would "
+-			           "never match protocol");
+-
+ 		info->match_flags |= XT_CONNTRACK_PROTO;
+ 		if (cb->invert)
+ 			info->invert_flags |= XT_CONNTRACK_PROTO;
+diff --git a/extensions/libxt_conntrack.t b/extensions/libxt_conntrack.t
+index db531475..2b3c5de9 100644
+--- a/extensions/libxt_conntrack.t
++++ b/extensions/libxt_conntrack.t
+@@ -25,3 +25,5 @@
+ -m conntrack --ctstatus EXPECTED;=;OK
+ -m conntrack --ctstatus SEEN_REPLY;=;OK
+ -m conntrack;;FAIL
++-m conntrack --ctproto 0;;FAIL
++-m conntrack ! --ctproto 0;;FAIL
+-- 
+cgit v1.2.3
+

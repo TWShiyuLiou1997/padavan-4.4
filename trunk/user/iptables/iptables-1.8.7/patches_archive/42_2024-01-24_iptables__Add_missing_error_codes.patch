@@ -1,0 +1,59 @@
+From 0a118c474924f05224b215cf38b7b3a19a9f0265 Mon Sep 17 00:00:00 2001
+From: Jacek Tomasiak <jacek.tomasiak@gmail.com>
+Date: Tue, 23 Jan 2024 11:14:27 +0100
+Subject: iptables: Add missing error codes
+
+Without these, commands like `iptables -n -L CHAIN` sometimes print
+"Incompatible with this kernel" instead of "No chain/target/match
+by that name".
+
+Signed-off-by: Jacek Tomasiak <jacek.tomasiak@gmail.com>
+Signed-off-by: Jacek Tomasiak <jtomasiak@arista.com>
+Signed-off-by: Phil Sutter <phil@nwl.cc>
+---
+ iptables/nft.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/iptables/nft.c b/iptables/nft.c
+index f5368578..c2cbc9d7 100644
+--- a/iptables/nft.c
++++ b/iptables/nft.c
+@@ -2812,8 +2812,10 @@ int nft_rule_list(struct nft_handle *h, const char *chain, const char *table,
+ 
+ 	if (chain) {
+ 		c = nft_chain_find(h, table, chain);
+-		if (!c)
++		if (!c) {
++			errno = ENOENT;
+ 			return 0;
++		}
+ 
+ 		if (rulenum)
+ 			d.save_fmt = true;	/* skip header printing */
+@@ -2920,8 +2922,10 @@ int nft_rule_list_save(struct nft_handle *h, const char *chain,
+ 
+ 	if (chain) {
+ 		c = nft_chain_find(h, table, chain);
+-		if (!c)
++		if (!c) {
++			errno = ENOENT;
+ 			return 0;
++		}
+ 
+ 		if (!rulenum)
+ 			nft_rule_list_chain_save(c, &counters);
+@@ -2953,8 +2957,10 @@ int nft_rule_zero_counters(struct nft_handle *h, const char *chain,
+ 	nft_fn = nft_rule_delete;
+ 
+ 	c = nft_chain_find(h, table, chain);
+-	if (!c)
++	if (!c) {
++		errno = ENOENT;
+ 		return 0;
++	}
+ 
+ 	r = nft_rule_find(h, c, NULL, rulenum);
+ 	if (r == NULL) {
+-- 
+cgit v1.2.3
+
