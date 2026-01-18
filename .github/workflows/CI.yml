@@ -94,127 +94,128 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] 同步 BusyBox 1.37.0 (最終修正：修正 Build Script 指向)
+      # [步驟 B] BusyBox 1.37.0 嚴格除錯演進版 (Strict Debug Evolution)
       # =======================================================
-      - name: 🔥 Sync BusyBox from padavan-ng
+      - name: 🔥 Sync & Evolve BusyBox (Debug Mode)
         run: |
-          echo "::group::Sync BusyBox 1.37.0"
+          # 1. 開啟極致除錯模式 (顯示每一行指令)
+          set -x
           
-          # 定義變數
+          echo "::group::BusyBox Evolution (Debug)"
+          
+          # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
-          BASE_DIR="$REPO_ROOT/trunk/user"
-          TARGET_DIR="$BASE_DIR/busybox"
+          ORIGINAL_CONFIG="$REPO_ROOT/trunk/configs/boards/busybox.config"
           SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
-          NEW_CONFIG_SRC="/tmp/padavan-ng/trunk/configs/boards/busybox.config"
-          MASTER_CONFIG_DEST="$REPO_ROOT/trunk/configs/boards/busybox.config"
-          BUILD_SCRIPT="$REPO_ROOT/trunk/build_firmware"
+          TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
 
-          # -------------------------------------------------------
-          # 1. 更新全域母板 (Root Config)
-          # -------------------------------------------------------
-          echo "⚡ Updating Master Board Config..."
-          if [ -f "$MASTER_CONFIG_DEST" ]; then
-              rm -f "$MASTER_CONFIG_DEST"
-          fi
-          
-          if [ ! -f "$NEW_CONFIG_SRC" ]; then
-              echo "❌ Error: 來源 Config 不存在 ($NEW_CONFIG_SRC)"
-              exit 1
-          fi
-          
-          mkdir -p "$(dirname "$MASTER_CONFIG_DEST")"
-          cp -f "$NEW_CONFIG_SRC" "$MASTER_CONFIG_DEST"
-          echo "✅ Master config updated."
+          # =======================================================
+          # A. [術前檢查] 掃描現狀 (Pre-Modification Inspection)
+          # =======================================================
+          echo "🔍 [PRE-CHECK] 1. Inspecting Build Scripts (Target: busybox_id)..."
+          # 找出 trunk 下所有與 build_firmware 相關的腳本，顯示 busybox_id 設定
+          find "$REPO_ROOT/trunk" -maxdepth 1 -name "build_firmware*" -o -name "*.sh" | xargs grep -n "busybox_id=" || true
 
-          # -------------------------------------------------------
-          # 2. 清理與搬運原始碼
-          # -------------------------------------------------------
-          echo "🗑️ Removing old busybox directory..."
+          echo "🔍 [PRE-CHECK] 2. Inspecting Makefiles (Target: busybox-1.24.x)..."
+          # 找出 user 目錄下所有依賴舊版 busybox 的檔案
+          grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" | head -n 20 || true
+          
+          echo "🔍 [PRE-CHECK] 3. Inspecting Config Header..."
+          # 確認目前的 Config 版本
+          head -n 5 "$ORIGINAL_CONFIG" || true
+
+          # =======================================================
+          # B. [準備階段] 原始碼替換
+          # =======================================================
+          echo "🗑️ Cleaning old busybox..."
           rm -rf "$TARGET_DIR"
           
           if [ ! -d "$SOURCE_DIR" ]; then
-             echo "❌ Error: 來源資料夾 $SOURCE_DIR 不存在"
+             echo "❌ Error: Padavan-ng source not found!"
              exit 1
           fi
 
-          echo "🚚 Copying busybox folder..."
+          echo "🚚 Copying BusyBox 1.37.0 source..."
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
           cd "$TARGET_DIR"
 
-          # -------------------------------------------------------
-          # 3. 部署局部 Config (雙層部署)
-          # -------------------------------------------------------
-          echo "🔧 Installing Local Configs..."
-          cp -f "$NEW_CONFIG_SRC" busybox-1.37.0/.config
-          cp -f "$NEW_CONFIG_SRC" ./config
-
-          # -------------------------------------------------------
-          # 4. [透明化驗證] 嚴格檢查 + 內容現形
-          # -------------------------------------------------------
-          echo "🔍 Starting Transparent Verification..."
-          CHECKS=("busybox-1.37.0/.config" "./config")
+          # =======================================================
+          # C. [演進階段] Config Evolution (1.24.2 -> 1.37.0)
+          # =======================================================
+          echo "🧬 Evolving config..."
           
-          for CONF in "${CHECKS[@]}"; do
-              echo "---------------------------------------------------"
-              echo "📂 Checking File: $CONF"
-              
-              if [ ! -f "$CONF" ]; then
-                  echo "❌ FAILED: File missing!"
-                  exit 1
-              fi
+          if [ ! -f "$ORIGINAL_CONFIG" ]; then
+              echo "❌ Error: Original config not found!"
+              exit 1
+          fi
 
-              # 條件 A: 檢查是否設定完成
-              HAS_DOT_CONFIG=$(grep -c "CONFIG_HAVE_DOT_CONFIG=y" "$CONF" || true)
-              # 條件 B: 檢查版本號是否匹配 (精確匹配 1.37.0)
-              IS_VER_137=$(grep -c "Busybox version: 1.37.0" "$CONF" || true)
-
-              if [ "$HAS_DOT_CONFIG" -eq 1 ] && [ "$IS_VER_137" -eq 1 ]; then
-                  echo "✅ PASS: Valid Config Header & Version 1.37.0 Match!"
-                  echo "👇 Head Content Preview (First 10 lines):"
-                  head -n 10 "$CONF"
-              else
-                  echo "❌ FAIL: Invalid Config Detected!"
-                  echo "   - Have Dot Config? : $HAS_DOT_CONFIG (Expected 1)"
-                  echo "   - Is Version 1.37.0? : $IS_VER_137 (Expected 1)"
-                  echo "👇 Bad Content Preview:"
-                  head -n 15 "$CONF"
-                  exit 1
-              fi
-          done
-
-          # -------------------------------------------------------
-          # 5. [Pre-seed 已移除] 
-          #    (依據您的指示，不再執行 make oldconfig，直接進行下一步)
-          # -------------------------------------------------------
-
-          # -------------------------------------------------------
-          # 6. [關鍵修復] 版本號全域修復 (包含 build_firmware)
-          # -------------------------------------------------------
-          echo "🔍 Patching dependencies & Build Script..."
-          OLD_VER="busybox-1.24.x"
-          NEW_VER="busybox-1.37.0"
+          # 1. 注入舊靈魂
+          cp -f "$ORIGINAL_CONFIG" busybox-1.37.0/.config
           
-          # A. 修正 Trunk 目錄下的編譯腳本 (這是您發現的那個問題點！)
-          #    我們會同時檢查 build_firmware 和 build_firmware_modify (如果存在)
-          echo "🛠️  Fixing busybox_id in build scripts..."
+          # 2. 自動演進 (信任 make olddefconfig)
+          cd busybox-1.37.0
+          make olddefconfig
           
-          # 針對 trunk 目錄下所有 shell script 進行替換，確保萬無一失
+          # 3. 驗證演進結果 (檢查版本號是否變更為 1.37.0)
+          if grep -q "Busybox version: 1.37.0" .config; then
+              echo "✅ Config successfully evolved to 1.37.0"
+          else
+              echo "❌ Error: Config evolution failed!"
+              head -n 10 .config
+              exit 1
+          fi
+
+          # 4. 回寫與同步
+          echo "💾 Saving evolved config..."
+          cp -f .config "$ORIGINAL_CONFIG"
+          cp -f .config ../config # 同步給外層 wrapper
+          
+          cd .. # 回到 user/busybox
+
+          # =======================================================
+          # D. [修正階段] 修改編譯腳本與依賴 (Global Patching)
+          # =======================================================
+          echo "🛠️ Patching build scripts..."
+          
+          # 1. 修正 build_firmware* (1.24.x -> 1.37.0)
           find "$REPO_ROOT/trunk" -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
               if grep -q 'busybox_id="1.24.x"' "$script"; then
-                  echo "   -> Patching $script ..."
+                  echo "   -> [SED] Patching $script ..."
                   sed -i 's/busybox_id="1.24.x"/busybox_id="1.37.0"/' "$script"
               fi
           done
 
-          # B. 修正 User 目錄下的所有參考 (Makefile 等)
-          grep -rl "$OLD_VER" "$BASE_DIR" | while read -r file ; do
-              sed -i "s/$OLD_VER/$NEW_VER/g" "$file"
-          done
-          grep -rl "busybox-1.24.2" "$BASE_DIR" | while read -r file ; do
-              sed -i "s/busybox-1.24.2/$NEW_VER/g" "$file"
-          done
+          echo "🔍 Patching source dependencies..."
+          # 2. 修正 user/ 下所有 Makefile 的版本引用
+          OLD_VER="busybox-1.24.x"
+          NEW_VER="busybox-1.37.0"
           
-          echo "🎉 BusyBox sync & Build Script Patching done!"
+          # 使用 xargs 配合 sed 進行批量替換，效率更高
+          grep -rl "$OLD_VER" "$REPO_ROOT/trunk/user" | xargs -r sed -i "s/$OLD_VER/$NEW_VER/g"
+          grep -rl "busybox-1.24.2" "$REPO_ROOT/trunk/user" | xargs -r sed -i "s/busybox-1.24.2/$NEW_VER/g"
+
+          # =======================================================
+          # E. [術後檢查] 驗證結果 (Post-Modification Verification)
+          # =======================================================
+          echo "🔍 [POST-CHECK] 1. Verifying Build Scripts (Should be 1.37.0)..."
+          find "$REPO_ROOT/trunk" -maxdepth 1 -name "build_firmware*" -o -name "*.sh" | xargs grep -n "busybox_id=" || true
+
+          echo "🔍 [POST-CHECK] 2. Verifying Makefiles (Should be 1.37.0)..."
+          # 這裡應該要「找不到」1.24.x 才對
+          REMAINING_OLD=$(grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" | wc -l)
+          if [ "$REMAINING_OLD" -eq 0 ]; then
+             echo "✅ All references to 1.24.x have been removed."
+          else
+             echo "⚠️ Warning: Found $REMAINING_OLD remaining references to 1.24.x:"
+             grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" || true
+          fi
+          
+          echo "🔍 [POST-CHECK] 3. Verifying New Config Header..."
+          head -n 5 "$ORIGINAL_CONFIG"
+          
+          # 關閉除錯模式
+          set +x
+          echo "🎉 Strict Debug Verification Complete!"
           echo "::endgroup::"
 
       # =======================================================
