@@ -94,7 +94,7 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 嚴格除錯演進版 (Fix: No rule for olddefconfig)
+      # [步驟 B] BusyBox 1.37.0 嚴格除錯演進版 (Fix: TIME64 + No rule for olddefconfig)
       # =======================================================
       - name: 🔥 Sync & Evolve BusyBox (Debug Mode)
         run: |
@@ -149,11 +149,10 @@ jobs:
           # 1. 注入舊靈魂
           cp -f "$ORIGINAL_CONFIG" busybox-1.37.0/.config
           
-          # 2. 自動演進 (修正點：改用最通用的 oldconfig)
+          # 2. 自動演進 (改用 yes "" | make oldconfig)
           cd busybox-1.37.0
           
           # [FIX] olddefconfig 失敗，改用 yes "" | make oldconfig
-          # 這會自動對所有新選項按 Enter (選預設值)，效果等同 olddefconfig 但相容性 100%
           yes "" | make oldconfig
           
           # 3. 驗證演進結果
@@ -163,6 +162,34 @@ jobs:
               echo "❌ Error: Config evolution failed!"
               head -n 10 .config
               exit 1
+          fi
+
+          # =======================================================
+          # [關鍵修正] TIME64 強制關閉與雙重驗證
+          # =======================================================
+          echo "🚑 Patching TIME64 setting..."
+          
+          # 3.1 修改前驗證 (Post-Make Check)
+          echo "🔍 Checking TIME64 before sed..."
+          grep "CONFIG_TIME64" .config || echo "TIME64 not found before sed (Might be default)"
+          
+          # 3.2 執行修正 (無論之前是什麼，強制改為 is not set)
+          #     注意：如果原本沒這行，sed 替換可能會失效，所以我們先嘗試替換，若沒替換成功則追加
+          if grep -q "CONFIG_TIME64" .config; then
+             sed -i 's/^CONFIG_TIME64=.*/# CONFIG_TIME64 is not set/' .config
+             sed -i 's/^# CONFIG_TIME64 is not set/# CONFIG_TIME64 is not set/' .config # 防呆，避免重複註解
+          else
+             echo "# CONFIG_TIME64 is not set" >> .config
+          fi
+          
+          # 3.3 修改後驗證 (Post-Sed Check)
+          echo "🔍 Checking TIME64 after sed..."
+          if grep -q "^# CONFIG_TIME64 is not set" .config; then
+             echo "✅ TIME64 is correctly disabled."
+          else
+             echo "❌ Error: TIME64 is NOT disabled! dumping config grep..."
+             grep "CONFIG_TIME64" .config
+             exit 1
           fi
 
           # 4. 回寫與同步
@@ -210,6 +237,9 @@ jobs:
           
           echo "🔍 [POST-CHECK] 3. Verifying New Config Header..."
           head -n 5 "$ORIGINAL_CONFIG"
+
+          echo "🔍 [POST-CHECK] 4. Final TIME64 Verification..."
+          grep "CONFIG_TIME64" "$ORIGINAL_CONFIG"
           
           # 關閉除錯模式
           set +x
