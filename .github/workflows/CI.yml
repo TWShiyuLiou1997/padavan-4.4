@@ -94,7 +94,7 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] 同步 BusyBox 1.37.0 (最終修正：Config 清洗與鎖定)
+      # [步驟 B] 同步 BusyBox 1.37.0 (最終修正：修正 Build Script 指向)
       # =======================================================
       - name: 🔥 Sync BusyBox from padavan-ng
         run: |
@@ -107,9 +107,27 @@ jobs:
           SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           NEW_CONFIG_SRC="/tmp/padavan-ng/trunk/configs/boards/busybox.config"
           MASTER_CONFIG_DEST="$REPO_ROOT/trunk/configs/boards/busybox.config"
+          BUILD_SCRIPT="$REPO_ROOT/trunk/build_firmware"
 
           # -------------------------------------------------------
-          # 1. 初始清理與搬運
+          # 1. 更新全域母板 (Root Config)
+          # -------------------------------------------------------
+          echo "⚡ Updating Master Board Config..."
+          if [ -f "$MASTER_CONFIG_DEST" ]; then
+              rm -f "$MASTER_CONFIG_DEST"
+          fi
+          
+          if [ ! -f "$NEW_CONFIG_SRC" ]; then
+              echo "❌ Error: 來源 Config 不存在 ($NEW_CONFIG_SRC)"
+              exit 1
+          fi
+          
+          mkdir -p "$(dirname "$MASTER_CONFIG_DEST")"
+          cp -f "$NEW_CONFIG_SRC" "$MASTER_CONFIG_DEST"
+          echo "✅ Master config updated."
+
+          # -------------------------------------------------------
+          # 2. 清理與搬運原始碼
           # -------------------------------------------------------
           echo "🗑️ Removing old busybox directory..."
           rm -rf "$TARGET_DIR"
@@ -124,80 +142,71 @@ jobs:
           cd "$TARGET_DIR"
 
           # -------------------------------------------------------
-          # 2. [核心關鍵] 部署並清洗 Config (Sanitize)
+          # 3. 部署局部 Config (雙層部署)
           # -------------------------------------------------------
-          echo "🔧 Installing and Sanitizing Config..."
-          
-          if [ ! -f "$NEW_CONFIG_SRC" ]; then
-             echo "❌ Error: 無法找到新版 Config 源文件"
-             exit 1
-          fi
-
-          # 先複製原始的新版 Config 進來
+          echo "🔧 Installing Local Configs..."
           cp -f "$NEW_CONFIG_SRC" busybox-1.37.0/.config
-          
-          cd busybox-1.37.0
-          
-          # [Magic Step] 使用 olddefconfig 自動清洗無效參數
-          # 這會移除 LOCK, NETMSG 等殭屍參數，並對新參數選預設值
-          echo "🧹 Running make olddefconfig to clean zombie symbols..."
-          make olddefconfig
-          
-          # -------------------------------------------------------
-          # 3. [回寫母板] 將清洗後的乾淨 Config 寫回全域
-          #    這步至關重要！確保主編譯流程複製的是「乾淨版」
-          # -------------------------------------------------------
-          echo "💾 Saving sanitized config as Master Board Config..."
-          # 確保目標目錄存在
-          mkdir -p "$(dirname "$MASTER_CONFIG_DEST")"
-          # 覆蓋原本的母板
-          cp -f .config "$MASTER_CONFIG_DEST"
-          
-          # 同步給外層 Makefile (欺騙它我們已經設定好了)
-          cp -f .config ../config
-          
-          # -------------------------------------------------------
-          # 4. [防禦性編譯] 預先生成依賴關係 (auto.conf)
-          #    解決 silentoldconfig Error 1 的最後一哩路
-          # -------------------------------------------------------
-          echo "⚙️  Generating make dependencies (include/config/auto.conf)..."
-          
-          # 這裡我們明確指定生成 auto.conf，這是 make 檢查依賴的關鍵檔案
-          # 如果這個檔案比 .config 新，make 就不會雞婆去跑 oldconfig
-          make include/config/auto.conf
-          
-          # 雙重保險：強制更新時間戳記
-          # 順序：.config (最舊) -> auto.conf (最新)
-          touch .config
-          sleep 1
-          touch include/config/auto.conf
-          
-          if [ -f "include/config/auto.conf" ]; then
-              echo "✅ Dependency map (auto.conf) generated."
-          else
-              echo "❌ Error: Failed to generate auto.conf"
-              exit 1
-          fi
-          cd ..
+          cp -f "$NEW_CONFIG_SRC" ./config
 
           # -------------------------------------------------------
-          # 5. [驗證] 最終檢查
+          # 4. [透明化驗證] 嚴格檢查 + 內容現形
           # -------------------------------------------------------
-          echo "🔍 Verifying clean config..."
-          if grep -q "CONFIG_HAVE_DOT_CONFIG=y" busybox-1.37.0/.config; then
-              echo "✅ Config is valid."
-          else
-              echo "❌ Error: Config corrupted during sanitization."
-              exit 1
-          fi
+          echo "🔍 Starting Transparent Verification..."
+          CHECKS=("busybox-1.37.0/.config" "./config")
+          
+          for CONF in "${CHECKS[@]}"; do
+              echo "---------------------------------------------------"
+              echo "📂 Checking File: $CONF"
+              
+              if [ ! -f "$CONF" ]; then
+                  echo "❌ FAILED: File missing!"
+                  exit 1
+              fi
+
+              # 條件 A: 檢查是否設定完成
+              HAS_DOT_CONFIG=$(grep -c "CONFIG_HAVE_DOT_CONFIG=y" "$CONF" || true)
+              # 條件 B: 檢查版本號是否匹配 (精確匹配 1.37.0)
+              IS_VER_137=$(grep -c "Busybox version: 1.37.0" "$CONF" || true)
+
+              if [ "$HAS_DOT_CONFIG" -eq 1 ] && [ "$IS_VER_137" -eq 1 ]; then
+                  echo "✅ PASS: Valid Config Header & Version 1.37.0 Match!"
+                  echo "👇 Head Content Preview (First 10 lines):"
+                  head -n 10 "$CONF"
+              else
+                  echo "❌ FAIL: Invalid Config Detected!"
+                  echo "   - Have Dot Config? : $HAS_DOT_CONFIG (Expected 1)"
+                  echo "   - Is Version 1.37.0? : $IS_VER_137 (Expected 1)"
+                  echo "👇 Bad Content Preview:"
+                  head -n 15 "$CONF"
+                  exit 1
+              fi
+          done
 
           # -------------------------------------------------------
-          # 6. 版本號修復
+          # 5. [Pre-seed 已移除] 
+          #    (依據您的指示，不再執行 make oldconfig，直接進行下一步)
           # -------------------------------------------------------
-          echo "🔍 Patching dependencies..."
+
+          # -------------------------------------------------------
+          # 6. [關鍵修復] 版本號全域修復 (包含 build_firmware)
+          # -------------------------------------------------------
+          echo "🔍 Patching dependencies & Build Script..."
           OLD_VER="busybox-1.24.x"
           NEW_VER="busybox-1.37.0"
           
+          # A. 修正 Trunk 目錄下的編譯腳本 (這是您發現的那個問題點！)
+          #    我們會同時檢查 build_firmware 和 build_firmware_modify (如果存在)
+          echo "🛠️  Fixing busybox_id in build scripts..."
+          
+          # 針對 trunk 目錄下所有 shell script 進行替換，確保萬無一失
+          find "$REPO_ROOT/trunk" -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
+              if grep -q 'busybox_id="1.24.x"' "$script"; then
+                  echo "   -> Patching $script ..."
+                  sed -i 's/busybox_id="1.24.x"/busybox_id="1.37.0"/' "$script"
+              fi
+          done
+
+          # B. 修正 User 目錄下的所有參考 (Makefile 等)
           grep -rl "$OLD_VER" "$BASE_DIR" | while read -r file ; do
               sed -i "s/$OLD_VER/$NEW_VER/g" "$file"
           done
@@ -205,7 +214,7 @@ jobs:
               sed -i "s/busybox-1.24.2/$NEW_VER/g" "$file"
           done
           
-          echo "🎉 BusyBox sync done! Cleaned & Locked."
+          echo "🎉 BusyBox sync & Build Script Patching done!"
           echo "::endgroup::"
 
       # =======================================================
