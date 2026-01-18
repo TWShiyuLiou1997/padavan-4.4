@@ -1030,6 +1030,7 @@ jobs:
           # 1. 收集關鍵配置與日誌
           echo "Collecting Configs and Logs..."
           [ -f "$WORK_DIR/trunk/.config" ] && cp "$WORK_DIR/trunk/.config" "$PACK_DIR/build.config"
+          [ -f "$WORK_DIR/trunk/configs/boards/busybox.config" ] && cp "$WORK_DIR/trunk/configs/boards/busybox.config" "$PACK_DIR/busybox.config"
           [ -f "$WORK_DIR/trunk/user/shared/defaults.h" ] && cp "$WORK_DIR/trunk/user/shared/defaults.h" "$PACK_DIR/defaults.h.txt"
           [ -f "$WORK_DIR/trunk/linux-4.4.x/.config" ] && cp "$WORK_DIR/trunk/linux-4.4.x/.config" "$PACK_DIR/kernel.config"
           # 這裡路徑要對應上面產生的位置
