@@ -94,11 +94,11 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 嚴格除錯演進版 (Strict Debug Evolution)
+      # [步驟 B] BusyBox 1.37.0 嚴格除錯演進版 (Fix: No rule for olddefconfig)
       # =======================================================
       - name: 🔥 Sync & Evolve BusyBox (Debug Mode)
         run: |
-          # 1. 開啟極致除錯模式 (顯示每一行指令)
+          # 1. 開啟極致除錯模式
           set -x
           
           echo "::group::BusyBox Evolution (Debug)"
@@ -110,18 +110,15 @@ jobs:
           TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
 
           # =======================================================
-          # A. [術前檢查] 掃描現狀 (Pre-Modification Inspection)
+          # A. [術前檢查] 掃描現狀
           # =======================================================
           echo "🔍 [PRE-CHECK] 1. Inspecting Build Scripts (Target: busybox_id)..."
-          # 找出 trunk 下所有與 build_firmware 相關的腳本，顯示 busybox_id 設定
           find "$REPO_ROOT/trunk" -maxdepth 1 -name "build_firmware*" -o -name "*.sh" | xargs grep -n "busybox_id=" || true
 
           echo "🔍 [PRE-CHECK] 2. Inspecting Makefiles (Target: busybox-1.24.x)..."
-          # 找出 user 目錄下所有依賴舊版 busybox 的檔案
           grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" | head -n 20 || true
           
           echo "🔍 [PRE-CHECK] 3. Inspecting Config Header..."
-          # 確認目前的 Config 版本
           head -n 5 "$ORIGINAL_CONFIG" || true
 
           # =======================================================
@@ -152,11 +149,14 @@ jobs:
           # 1. 注入舊靈魂
           cp -f "$ORIGINAL_CONFIG" busybox-1.37.0/.config
           
-          # 2. 自動演進 (信任 make olddefconfig)
+          # 2. 自動演進 (修正點：改用最通用的 oldconfig)
           cd busybox-1.37.0
-          make olddefconfig
           
-          # 3. 驗證演進結果 (檢查版本號是否變更為 1.37.0)
+          # [FIX] olddefconfig 失敗，改用 yes "" | make oldconfig
+          # 這會自動對所有新選項按 Enter (選預設值)，效果等同 olddefconfig 但相容性 100%
+          yes "" | make oldconfig
+          
+          # 3. 驗證演進結果
           if grep -q "Busybox version: 1.37.0" .config; then
               echo "✅ Config successfully evolved to 1.37.0"
           else
@@ -168,16 +168,16 @@ jobs:
           # 4. 回寫與同步
           echo "💾 Saving evolved config..."
           cp -f .config "$ORIGINAL_CONFIG"
-          cp -f .config ../config # 同步給外層 wrapper
+          cp -f .config ../config
           
           cd .. # 回到 user/busybox
 
           # =======================================================
-          # D. [修正階段] 修改編譯腳本與依賴 (Global Patching)
+          # D. [修正階段] 修改編譯腳本與依賴
           # =======================================================
           echo "🛠️ Patching build scripts..."
           
-          # 1. 修正 build_firmware* (1.24.x -> 1.37.0)
+          # 1. 修正 build_firmware*
           find "$REPO_ROOT/trunk" -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
               if grep -q 'busybox_id="1.24.x"' "$script"; then
                   echo "   -> [SED] Patching $script ..."
@@ -186,22 +186,20 @@ jobs:
           done
 
           echo "🔍 Patching source dependencies..."
-          # 2. 修正 user/ 下所有 Makefile 的版本引用
+          # 2. 修正 user/ 下所有 Makefile
           OLD_VER="busybox-1.24.x"
           NEW_VER="busybox-1.37.0"
           
-          # 使用 xargs 配合 sed 進行批量替換，效率更高
           grep -rl "$OLD_VER" "$REPO_ROOT/trunk/user" | xargs -r sed -i "s/$OLD_VER/$NEW_VER/g"
           grep -rl "busybox-1.24.2" "$REPO_ROOT/trunk/user" | xargs -r sed -i "s/busybox-1.24.2/$NEW_VER/g"
 
           # =======================================================
-          # E. [術後檢查] 驗證結果 (Post-Modification Verification)
+          # E. [術後檢查] 驗證結果
           # =======================================================
           echo "🔍 [POST-CHECK] 1. Verifying Build Scripts (Should be 1.37.0)..."
           find "$REPO_ROOT/trunk" -maxdepth 1 -name "build_firmware*" -o -name "*.sh" | xargs grep -n "busybox_id=" || true
 
           echo "🔍 [POST-CHECK] 2. Verifying Makefiles (Should be 1.37.0)..."
-          # 這裡應該要「找不到」1.24.x 才對
           REMAINING_OLD=$(grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" | wc -l)
           if [ "$REMAINING_OLD" -eq 0 ]; then
              echo "✅ All references to 1.24.x have been removed."
