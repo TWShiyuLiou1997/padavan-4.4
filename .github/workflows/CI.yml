@@ -157,41 +157,47 @@ jobs:
           yes "" | make oldconfig
           
           # =======================================================
-          # [CRITICAL FIX V2] 深度修復日誌鏈 (Logread + Klogd File Mode)
+          # [CRITICAL FIX V4] 最終日誌修復方案
           # =======================================================
-          echo "🔧 [FIX] Reconstructing Syslog/Klogd pipeline..."
+          echo "🔧 [FIX] Applying Final Log Configs..."
           
-          # 1. [Reader] 開啟內建 Logread (已驗證成功)
-          sed -i 's/^# CONFIG_LOGREAD is not set/CONFIG_LOGREAD=y/' .config
-          
-          # 2. [Buffer] 開啟 IPC 緩衝區 (已驗證成功)
-          sed -i 's/^# CONFIG_FEATURE_IPC_SYSLOG is not set/CONFIG_FEATURE_IPC_SYSLOG=y/' .config
-          # 2.1 確保緩衝區大小足夠 (16KB)
-          if grep -q "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" .config; then
-             sed -i 's/^CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=.*/CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16/' .config
-          else
-             echo "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16" >> .config
-          fi
-          
-          # 3. [Writer] 調整 Syslogd 接收緩衝區 (對齊 1.24.2)
-          # 1.37.0 預設較小，改回 512 確保不掉包
-          if grep -q "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" .config; then
-             sed -i 's/^CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=.*/CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512/' .config
-          else
-             echo "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512" >> .config
-          fi
-          
-          # 4. [Source] 強制 Klogd 使用文件模式 (關鍵修正！)
-          # 關閉 KLOGCTL (Syscall)，強制讀取 /proc/kmsg，這是最穩定的方式
-          sed -i 's/^CONFIG_FEATURE_KLOGD_KLOGCTL=y/# CONFIG_FEATURE_KLOGD_KLOGCTL is not set/' .config
-          # 確保 KLOGD 本身是開啟的
-          sed -i 's/^# CONFIG_KLOGD is not set/CONFIG_KLOGD=y/' .config
-          
-          # 5. [Cleanup] 移除 KMSG_SYSLOG (避免衝突)
-          # 我們改用純 Klogd 模式，不需要 syslogd 自己去搶讀 /dev/kmsg
-          sed -i 's/^CONFIG_FEATURE_KMSG_SYSLOG=y/# CONFIG_FEATURE_KMSG_SYSLOG is not set/' .config
+          # 定義強制設定函數 (保證無殘留)
+          force_config() {
+              local key=$1
+              local value=$2
+              sed -i "/$key/d" .config
+              echo "$value" >> .config
+          }
 
-          # 6. 套用所有修正
+          # -------------------------------------------------------
+          # 關鍵點 1: 開啟 Logread (解決新舊版本內存結構不相容問題)
+          # -------------------------------------------------------
+          force_config "CONFIG_LOGREAD" "CONFIG_LOGREAD=y"
+          
+          # -------------------------------------------------------
+          # 關鍵點 2: 恢復 1.24.2 的 Klogd 行為 (解決啟動崩潰問題)
+          # Padavan 啟動腳本需要 klogctl 支援 (例如 klogd -c 7)
+          # -------------------------------------------------------
+          force_config "CONFIG_KLOGD" "CONFIG_KLOGD=y"
+          force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "CONFIG_FEATURE_KLOGD_KLOGCTL=y"
+          
+          # -------------------------------------------------------
+          # 關鍵點 3: 避免衝突 (解決 Syslogd 搶佔資源問題)
+          # 1.37.0 預設會開這個，導致跟 klogd 打架，必須強制關閉
+          # -------------------------------------------------------
+          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "# CONFIG_FEATURE_KMSG_SYSLOG is not set"
+
+          # -------------------------------------------------------
+          # 關鍵點 4: 基礎設施 (IPC Buffer & Syslogd)
+          # -------------------------------------------------------
+          force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
+          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512"
+          force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
+          force_config "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16"
+
+          # -------------------------------------------------------
+          # 再次執行 oldconfig 確保依賴正確
+          # -------------------------------------------------------
           yes "" | make oldconfig
 
           # 3. 驗證演進結果
