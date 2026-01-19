@@ -94,7 +94,7 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 最終完結篇 (V5: Inject -C Flag)
+      # [步驟 B] BusyBox 1.37.0 最終完結篇 (V5.1: Path Fixed)
       # =======================================================
       - name: 🔥 Sync & Evolve BusyBox (Final Fix)
         run: |
@@ -110,10 +110,21 @@ jobs:
           # 1. 替換原始碼
           rm -rf "$TARGET_DIR"
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
+          
+          # [FIX] 進入正確的源碼目錄 (關鍵修正！)
           cd "$TARGET_DIR"
+          if [ -d "busybox-1.37.0" ]; then
+              cd "busybox-1.37.0"
+              echo "📂 Entered subdirectory: busybox-1.37.0"
+          fi
 
           # 2. 繼承舊 Config
-          cp -f "$ORIGINAL_CONFIG" .config
+          if [ -f "$ORIGINAL_CONFIG" ]; then
+              cp -f "$ORIGINAL_CONFIG" .config
+          else
+              echo "❌ Error: Original config not found at $ORIGINAL_CONFIG"
+              exit 1
+          fi
           
           # =======================================================
           # [CRITICAL] 1. Config 強制修正 (維持 V4 的正確設定)
@@ -147,7 +158,7 @@ jobs:
           # [Time64] 關閉 Time64
           force_config "CONFIG_TIME64" "# CONFIG_TIME64 is not set"
 
-          # 生成 Config
+          # 生成 Config (現在目錄對了，這步就會成功)
           yes "" | make oldconfig
           
           # 回寫 Config
@@ -155,12 +166,11 @@ jobs:
           cp -f .config ../config
 
           # =======================================================
-          # [CRITICAL] 2. 修正 Padavan 啟動參數 (這是 V5 的核心！)
-          # 原因：原版 Syslogd 需要 "-C" 參數才能開啟內存日誌，但 Padavan 預設沒加。
-          # 作法：找到 rc/syslog.c 並插入 "-C16" 參數。
+          # [CRITICAL] 2. 修正 Padavan 啟動參數 (V5 核心)
           # =======================================================
           echo "🔧 [FIX] Patching Padavan Init Script (RC) to add -C flag..."
           
+          # 切換到 rc 目錄
           cd "$REPO_ROOT/trunk/user/rc"
           
           # 找到啟動 syslogd 的文件 (通常是 syslog.c)
@@ -169,12 +179,10 @@ jobs:
           if [ -n "$RC_FILE" ]; then
               echo "   -> Found init file: $RC_FILE"
               # 替換指令：在 "syslogd", 後面插入 "-C16", 
-              # 原本可能是 { "syslogd", "-m", ... }
-              # 變成 { "syslogd", "-C16", "-m", ... }
               sed -i 's/"syslogd",/"syslogd", "-C16",/' "$RC_FILE"
               
               echo "✅ Successfully injected -C16 flag into $RC_FILE"
-              grep "syslogd" "$RC_FILE" | grep "\-C16" # 驗證一下
+              grep "syslogd" "$RC_FILE" | grep "\-C16"
           else
               echo "⚠️ Warning: Could not find syslogd launch code in RC!"
           fi
@@ -196,7 +204,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V5: Config + Init Fix)."
+          echo "🎉 BusyBox 1.37.0 Ready (V5.1: Correct Path + Init Fix)."
           echo "::endgroup::"
 
       # =======================================================
