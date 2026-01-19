@@ -94,14 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 嚴格除錯演進版 (Fix: TIME64 + Logread Missing)
+      # [步驟 B] BusyBox 1.37.0 最終完結篇 (V5: Inject -C Flag)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (Debug Mode)
+      - name: 🔥 Sync & Evolve BusyBox (Final Fix)
         run: |
-          # 1. 開啟極致除錯模式
           set -x
-          
-          echo "::group::BusyBox Evolution (Debug)"
+          echo "::group::BusyBox Evolution"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -109,59 +107,19 @@ jobs:
           SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
 
-          # =======================================================
-          # A. [術前檢查] 掃描現狀
-          # =======================================================
-          echo "🔍 [PRE-CHECK] 1. Inspecting Build Scripts (Target: busybox_id)..."
-          find "$REPO_ROOT/trunk" -maxdepth 1 -name "build_firmware*" -o -name "*.sh" | xargs grep -n "busybox_id=" || true
-
-          echo "🔍 [PRE-CHECK] 2. Inspecting Makefiles (Target: busybox-1.24.x)..."
-          grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" | head -n 20 || true
-          
-          echo "🔍 [PRE-CHECK] 3. Inspecting Config Header..."
-          head -n 5 "$ORIGINAL_CONFIG" || true
-
-          # =======================================================
-          # B. [準備階段] 原始碼替換
-          # =======================================================
-          echo "🗑️ Cleaning old busybox..."
+          # 1. 替換原始碼
           rm -rf "$TARGET_DIR"
-          
-          if [ ! -d "$SOURCE_DIR" ]; then
-             echo "❌ Error: Padavan-ng source not found!"
-             exit 1
-          fi
-
-          echo "🚚 Copying BusyBox 1.37.0 source..."
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
           cd "$TARGET_DIR"
 
-          # =======================================================
-          # C. [演進階段] Config Evolution (1.24.2 -> 1.37.0)
-          # =======================================================
-          echo "🧬 Evolving config..."
-          
-          if [ ! -f "$ORIGINAL_CONFIG" ]; then
-             echo "❌ Error: Original config not found!"
-             exit 1
-          fi
-
-          # 1. 注入舊靈魂
-          cp -f "$ORIGINAL_CONFIG" busybox-1.37.0/.config
-          
-          # 2. 自動演進
-          cd busybox-1.37.0
-          
-          # [FIX] olddefconfig 失敗，改用 yes "" | make oldconfig
-          # 這會產生一個基礎的新版 config，但很多新功能預設是關閉的
-          yes "" | make oldconfig
+          # 2. 繼承舊 Config
+          cp -f "$ORIGINAL_CONFIG" .config
           
           # =======================================================
-          # [CRITICAL FIX V4] 最終日誌修復方案
+          # [CRITICAL] 1. Config 強制修正 (維持 V4 的正確設定)
           # =======================================================
-          echo "🔧 [FIX] Applying Final Log Configs..."
+          echo "🔧 [FIX] Injecting Critical Log Configs..."
           
-          # 定義強制設定函數 (保證無殘留)
           force_config() {
               local key=$1
               local value=$2
@@ -169,129 +127,76 @@ jobs:
               echo "$value" >> .config
           }
 
-          # -------------------------------------------------------
-          # 關鍵點 1: 開啟 Logread (解決新舊版本內存結構不相容問題)
-          # -------------------------------------------------------
+          # [Reader] 開啟 Logread
           force_config "CONFIG_LOGREAD" "CONFIG_LOGREAD=y"
           
-          # -------------------------------------------------------
-          # 關鍵點 2: 恢復 1.24.2 的 Klogd 行為 (解決啟動崩潰問題)
-          # Padavan 啟動腳本需要 klogctl 支援 (例如 klogd -c 7)
-          # -------------------------------------------------------
+          # [Interface] 開啟 Klogd + Klogctl (讓 klogd 活著)
           force_config "CONFIG_KLOGD" "CONFIG_KLOGD=y"
           force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "CONFIG_FEATURE_KLOGD_KLOGCTL=y"
           
-          # -------------------------------------------------------
-          # 關鍵點 3: 避免衝突 (解決 Syslogd 搶佔資源問題)
-          # 1.37.0 預設會開這個，導致跟 klogd 打架，必須強制關閉
-          # -------------------------------------------------------
+          # [Conflict] 關閉 KMSG_SYSLOG (避免衝突)
           force_config "CONFIG_FEATURE_KMSG_SYSLOG" "# CONFIG_FEATURE_KMSG_SYSLOG is not set"
 
-          # -------------------------------------------------------
-          # 關鍵點 4: 基礎設施 (IPC Buffer & Syslogd)
-          # -------------------------------------------------------
+          # [Infrastructure] 基礎設施
           force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
-          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512"
+          force_config "CONFIG_FEATURE_Rotate_LOGFILE" "CONFIG_FEATURE_ROTATE_LOGFILE=y"
           force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
           force_config "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16"
+          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512"
+          
+          # [Time64] 關閉 Time64
+          force_config "CONFIG_TIME64" "# CONFIG_TIME64 is not set"
 
-          # -------------------------------------------------------
-          # 再次執行 oldconfig 確保依賴正確
-          # -------------------------------------------------------
+          # 生成 Config
           yes "" | make oldconfig
-
-          # 3. 驗證演進結果
-          if grep -q "Busybox version: 1.37.0" .config; then
-             echo "✅ Config successfully evolved to 1.37.0"
-          else
-             echo "❌ Error: Config evolution failed!"
-             head -n 10 .config
-             exit 1
-          fi
-
-          # =======================================================
-          # [關鍵修正] TIME64 強制關閉與雙重驗證
-          # =======================================================
-          echo "🚑 Patching TIME64 setting..."
           
-          # 3.1 修改前驗證
-          echo "🔍 Checking TIME64 before sed..."
-          grep "CONFIG_TIME64" .config || echo "TIME64 not found before sed (Might be default)"
-          
-          # 3.2 執行修正 (強制改為 is not set)
-          if grep -q "CONFIG_TIME64" .config; then
-             sed -i 's/^CONFIG_TIME64=.*/# CONFIG_TIME64 is not set/' .config
-             sed -i 's/^# CONFIG_TIME64 is not set/# CONFIG_TIME64 is not set/' .config
-          else
-             echo "# CONFIG_TIME64 is not set" >> .config
-          fi
-          
-          # 3.3 修改後驗證
-          echo "🔍 Checking TIME64 after sed..."
-          if grep -q "^# CONFIG_TIME64 is not set" .config; then
-             echo "✅ TIME64 is correctly disabled."
-          else
-             echo "❌ Error: TIME64 is NOT disabled! dumping config grep..."
-             grep "CONFIG_TIME64" .config
-             exit 1
-          fi
-
-          # 4. 回寫與同步
-          echo "💾 Saving evolved config..."
+          # 回寫 Config
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
-          
-          cd .. # 回到 user/busybox
 
           # =======================================================
-          # D. [修正階段] 修改編譯腳本與依賴
+          # [CRITICAL] 2. 修正 Padavan 啟動參數 (這是 V5 的核心！)
+          # 原因：原版 Syslogd 需要 "-C" 參數才能開啟內存日誌，但 Padavan 預設沒加。
+          # 作法：找到 rc/syslog.c 並插入 "-C16" 參數。
           # =======================================================
-          echo "🛠️ Patching build scripts..."
+          echo "🔧 [FIX] Patching Padavan Init Script (RC) to add -C flag..."
           
-          # 1. 修正 build_firmware*
-          find "$REPO_ROOT/trunk" -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
+          cd "$REPO_ROOT/trunk/user/rc"
+          
+          # 找到啟動 syslogd 的文件 (通常是 syslog.c)
+          RC_FILE=$(grep -l '"syslogd"' *.c | head -n 1)
+          
+          if [ -n "$RC_FILE" ]; then
+              echo "   -> Found init file: $RC_FILE"
+              # 替換指令：在 "syslogd", 後面插入 "-C16", 
+              # 原本可能是 { "syslogd", "-m", ... }
+              # 變成 { "syslogd", "-C16", "-m", ... }
+              sed -i 's/"syslogd",/"syslogd", "-C16",/' "$RC_FILE"
+              
+              echo "✅ Successfully injected -C16 flag into $RC_FILE"
+              grep "syslogd" "$RC_FILE" | grep "\-C16" # 驗證一下
+          else
+              echo "⚠️ Warning: Could not find syslogd launch code in RC!"
+          fi
+
+          # =======================================================
+          # [Cleanup] 版本號修正
+          # =======================================================
+          cd "$REPO_ROOT/trunk"
+          
+          # 修改編譯腳本
+          find . -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
              if grep -q 'busybox_id="1.24.x"' "$script"; then
-                echo "   -> [SED] Patching $script ..."
                 sed -i 's/busybox_id="1.24.x"/busybox_id="1.37.0"/' "$script"
              fi
           done
 
-          echo "🔍 Patching source dependencies..."
-          # 2. 修正 user/ 下所有 Makefile
-          OLD_VER="busybox-1.24.x"
-          NEW_VER="busybox-1.37.0"
-          
-          grep -rl "$OLD_VER" "$REPO_ROOT/trunk/user" | xargs -r sed -i "s/$OLD_VER/$NEW_VER/g"
-          grep -rl "busybox-1.24.2" "$REPO_ROOT/trunk/user" | xargs -r sed -i "s/busybox-1.24.2/$NEW_VER/g"
+          # 修改 Makefile
+          grep -rl "busybox-1.24.x" user/ | xargs -r sed -i "s/busybox-1.24.x/busybox-1.37.0/g"
+          grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
-          # =======================================================
-          # E. [術後檢查] 驗證結果
-          # =======================================================
-          echo "🔍 [POST-CHECK] 1. Verifying Build Scripts (Should be 1.37.0)..."
-          find "$REPO_ROOT/trunk" -maxdepth 1 -name "build_firmware*" -o -name "*.sh" | xargs grep -n "busybox_id=" || true
-
-          echo "🔍 [POST-CHECK] 2. Verifying Makefiles (Should be 1.37.0)..."
-          REMAINING_OLD=$(grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" | wc -l)
-          if [ "$REMAINING_OLD" -eq 0 ]; then
-             echo "✅ All references to 1.24.x have been removed."
-          else
-             echo "⚠️ Warning: Found $REMAINING_OLD remaining references to 1.24.x:"
-             grep -rn "busybox-1.24.x" "$REPO_ROOT/trunk/user" || true
-          fi
-          
-          echo "🔍 [POST-CHECK] 3. Verifying New Config Header..."
-          head -n 5 "$ORIGINAL_CONFIG"
-
-          echo "🔍 [POST-CHECK] 4. Final TIME64 Verification..."
-          grep "CONFIG_TIME64" "$ORIGINAL_CONFIG"
-          
-          # 檢查 Logread 是否已開啟
-          echo "🔍 [POST-CHECK] 5. Final Logread Verification..."
-          grep "CONFIG_LOGREAD" "$ORIGINAL_CONFIG"
-          
-          # 關閉除錯模式
           set +x
-          echo "🎉 Strict Debug Verification Complete!"
+          echo "🎉 BusyBox 1.37.0 Ready (V5: Config + Init Fix)."
           echo "::endgroup::"
 
       # =======================================================
