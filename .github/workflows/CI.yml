@@ -157,37 +157,41 @@ jobs:
           yes "" | make oldconfig
           
           # =======================================================
-          # [CRITICAL FIX] 恢復日誌功能 (配對 Reader 與 Writer)
-          # 解釋：1.37.0 的 syslogd 內存結構變了，舊的系統 logread 讀不到。
-          # 必須開啟 BusyBox 內建的 CONFIG_LOGREAD 來匹配。
+          # [CRITICAL FIX V2] 深度修復日誌鏈 (Logread + Klogd File Mode)
           # =======================================================
-          echo "🔧 [FIX] Enabling internal Logread to match Syslogd..."
+          echo "🔧 [FIX] Reconstructing Syslog/Klogd pipeline..."
           
-          # 1. 強制開啟 logread 指令 (這是最關鍵的一步！)
+          # 1. [Reader] 開啟內建 Logread (已驗證成功)
           sed -i 's/^# CONFIG_LOGREAD is not set/CONFIG_LOGREAD=y/' .config
           
-          # 2. 確保 IPC 緩衝區開啟 (Padavan 日誌寫入 RAM 的機制)
+          # 2. [Buffer] 開啟 IPC 緩衝區 (已驗證成功)
           sed -i 's/^# CONFIG_FEATURE_IPC_SYSLOG is not set/CONFIG_FEATURE_IPC_SYSLOG=y/' .config
-          
-          # 3. 加大緩衝區並確保與 config 格式相容 (防止溢出)
+          # 2.1 確保緩衝區大小足夠 (16KB)
           if grep -q "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" .config; then
              sed -i 's/^CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=.*/CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16/' .config
           else
              echo "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16" >> .config
           fi
           
-          # 4. 確保 KLOGD 開啟 (負責抓取 Kernel 日誌)
-          sed -i 's/^# CONFIG_KLOGD is not set/CONFIG_KLOGD=y/' .config
-          sed -i 's/^# CONFIG_FEATURE_KLOGD_KLOGCTL is not set/CONFIG_FEATURE_KLOGD_KLOGCTL=y/' .config
-          
-          # 5. [加強] 開啟 KMSG 支援 (Linux 4.4 建議選項，從 /dev/kmsg 讀取)
-          if grep -q "CONFIG_FEATURE_KMSG_SYSLOG" .config; then
-             sed -i 's/^# CONFIG_FEATURE_KMSG_SYSLOG is not set/CONFIG_FEATURE_KMSG_SYSLOG=y/' .config
+          # 3. [Writer] 調整 Syslogd 接收緩衝區 (對齊 1.24.2)
+          # 1.37.0 預設較小，改回 512 確保不掉包
+          if grep -q "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" .config; then
+             sed -i 's/^CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=.*/CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512/' .config
           else
-             echo "CONFIG_FEATURE_KMSG_SYSLOG=y" >> .config
+             echo "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512" >> .config
           fi
+          
+          # 4. [Source] 強制 Klogd 使用文件模式 (關鍵修正！)
+          # 關閉 KLOGCTL (Syscall)，強制讀取 /proc/kmsg，這是最穩定的方式
+          sed -i 's/^CONFIG_FEATURE_KLOGD_KLOGCTL=y/# CONFIG_FEATURE_KLOGD_KLOGCTL is not set/' .config
+          # 確保 KLOGD 本身是開啟的
+          sed -i 's/^# CONFIG_KLOGD is not set/CONFIG_KLOGD=y/' .config
+          
+          # 5. [Cleanup] 移除 KMSG_SYSLOG (避免衝突)
+          # 我們改用純 Klogd 模式，不需要 syslogd 自己去搶讀 /dev/kmsg
+          sed -i 's/^CONFIG_FEATURE_KMSG_SYSLOG=y/# CONFIG_FEATURE_KMSG_SYSLOG is not set/' .config
 
-          # 6. 套用日誌修正後，再次整理 config 依賴
+          # 6. 套用所有修正
           yes "" | make oldconfig
 
           # 3. 驗證演進結果
