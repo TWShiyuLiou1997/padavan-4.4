@@ -94,7 +94,7 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 最終完結篇 (V5.2: The Unification)
+      # [步驟 B] BusyBox 1.37.0 最終修正版 (V5.3: Precision Strike)
       # =======================================================
       - name: 🔥 Sync & Evolve BusyBox (Final Fix)
         run: |
@@ -115,7 +115,6 @@ jobs:
           cd "$TARGET_DIR"
           if [ -d "busybox-1.37.0" ]; then
               cd "busybox-1.37.0"
-              echo "📂 Entered subdirectory: busybox-1.37.0"
           fi
 
           # 2. 繼承舊 Config
@@ -138,14 +137,14 @@ jobs:
               echo "$value" >> .config
           }
 
-          # [Reader] 必須開啟
+          # [Reader] 開啟 Logread
           force_config "CONFIG_LOGREAD" "CONFIG_LOGREAD=y"
           
-          # [Strategy Change] 關閉 KLOGD (我們不需要它了)
+          # [Strategy] 關閉 KLOGD (改用 syslogd -K)
           force_config "CONFIG_KLOGD" "# CONFIG_KLOGD is not set"
           force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "# CONFIG_FEATURE_KLOGD_KLOGCTL is not set"
           
-          # [Strategy Change] 開啟 KMSG_SYSLOG (讓 syslogd 直接讀取核心)
+          # [Strategy] 開啟 KMSG_SYSLOG (syslogd 抓核心日誌)
           force_config "CONFIG_FEATURE_KMSG_SYSLOG" "CONFIG_FEATURE_KMSG_SYSLOG=y"
 
           # [Infrastructure] 基礎設施
@@ -153,40 +152,41 @@ jobs:
           force_config "CONFIG_FEATURE_Rotate_LOGFILE" "CONFIG_FEATURE_ROTATE_LOGFILE=y"
           force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
           force_config "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16"
-          # 加大讀取緩衝區以應對核心大量日誌
           force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=1024"
-          
-          # [Time64] 關閉
           force_config "CONFIG_TIME64" "# CONFIG_TIME64 is not set"
 
-          # 生成 Config
           yes "" | make oldconfig
-          
-          # 回寫 Config
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
 
           # =======================================================
-          # [CRITICAL] 2. 注入雙重參數 (-C16 -K)
-          # -C16: 建立內存緩衝區 (給 logread 用)
-          # -K:   直接抓取核心訊息 (取代 klogd)
+          # [CRITICAL] 2. 修正 Padavan 啟動參數 (services.c)
           # =======================================================
           echo "🔧 [FIX] Patching Padavan Init Script (RC)..."
           
           cd "$REPO_ROOT/trunk/user/rc"
-          RC_FILE=$(grep -l '"syslogd"' *.c | head -n 1)
+          RC_FILE="services.c" 
           
-          if [ -n "$RC_FILE" ]; then
+          if [ -f "$RC_FILE" ]; then
               echo "   -> Found init file: $RC_FILE"
-              # 替換指令：插入 -C16 和 -K
-              # 原始: "syslogd",
-              # 目標: "syslogd", "-C16", "-K",
-              sed -i 's/"syslogd",/"syslogd", "-C16", "-K",/' "$RC_FILE"
               
-              echo "✅ Successfully injected flags into $RC_FILE"
-              grep "syslogd" "$RC_FILE" | grep "\-K"
+              # 1. 修正 start_syslogd (注入參數)
+              # 使用 | 作為分隔符，確保正確匹配
+              sed -i 's|"/sbin/syslogd",|"/sbin/syslogd", "-C16", "-K",|' "$RC_FILE"
+              
+              # 2. 停用 start_klogd (防止報錯)
+              sed -i 's|return eval("/sbin/klogd");|return 0; // klogd disabled|' "$RC_FILE"
+              
+              # 3. 復原之前可能誤傷的 stop 函數 (確保代碼乾淨)
+              sed -i 's|"syslogd", "-C16", NULL|"syslogd", NULL|' "$RC_FILE"
+              sed -i 's|"syslogd", "-C16", "-K", NULL|"syslogd", NULL|' "$RC_FILE"
+
+              echo "✅ Patching complete. Verifying result..."
+              grep -C 2 "/sbin/syslogd" "$RC_FILE"
+              grep -C 1 "start_klogd" "$RC_FILE"
           else
-              echo "⚠️ Warning: Could not find syslogd launch code!"
+              echo "❌ Error: services.c not found!"
+              exit 1
           fi
 
           # =======================================================
@@ -204,7 +204,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V5.2: The Unification)."
+          echo "🎉 BusyBox 1.37.0 Ready (V5.3: Precision Strike)."
           echo "::endgroup::"
 
       # =======================================================
