@@ -94,7 +94,7 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 最終完結篇 (V5.1: Path Fixed)
+      # [步驟 B] BusyBox 1.37.0 最終完結篇 (V5.2: The Unification)
       # =======================================================
       - name: 🔥 Sync & Evolve BusyBox (Final Fix)
         run: |
@@ -111,7 +111,7 @@ jobs:
           rm -rf "$TARGET_DIR"
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
           
-          # [FIX] 進入正確的源碼目錄 (關鍵修正！)
+          # [PATH FIX] 進入正確的源碼目錄
           cd "$TARGET_DIR"
           if [ -d "busybox-1.37.0" ]; then
               cd "busybox-1.37.0"
@@ -122,14 +122,14 @@ jobs:
           if [ -f "$ORIGINAL_CONFIG" ]; then
               cp -f "$ORIGINAL_CONFIG" .config
           else
-              echo "❌ Error: Original config not found at $ORIGINAL_CONFIG"
+              echo "❌ Error: Original config not found!"
               exit 1
           fi
           
           # =======================================================
-          # [CRITICAL] 1. Config 強制修正 (維持 V4 的正確設定)
+          # [CRITICAL] 1. Config 戰略調整 (二合一模式)
           # =======================================================
-          echo "🔧 [FIX] Injecting Critical Log Configs..."
+          echo "🔧 [FIX] Switching to Single-Process Log Strategy..."
           
           force_config() {
               local key=$1
@@ -138,27 +138,28 @@ jobs:
               echo "$value" >> .config
           }
 
-          # [Reader] 開啟 Logread
+          # [Reader] 必須開啟
           force_config "CONFIG_LOGREAD" "CONFIG_LOGREAD=y"
           
-          # [Interface] 開啟 Klogd + Klogctl (讓 klogd 活著)
-          force_config "CONFIG_KLOGD" "CONFIG_KLOGD=y"
-          force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "CONFIG_FEATURE_KLOGD_KLOGCTL=y"
+          # [Strategy Change] 關閉 KLOGD (我們不需要它了)
+          force_config "CONFIG_KLOGD" "# CONFIG_KLOGD is not set"
+          force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "# CONFIG_FEATURE_KLOGD_KLOGCTL is not set"
           
-          # [Conflict] 關閉 KMSG_SYSLOG (避免衝突)
-          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "# CONFIG_FEATURE_KMSG_SYSLOG is not set"
+          # [Strategy Change] 開啟 KMSG_SYSLOG (讓 syslogd 直接讀取核心)
+          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "CONFIG_FEATURE_KMSG_SYSLOG=y"
 
           # [Infrastructure] 基礎設施
           force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
           force_config "CONFIG_FEATURE_Rotate_LOGFILE" "CONFIG_FEATURE_ROTATE_LOGFILE=y"
           force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
           force_config "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16"
-          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512"
+          # 加大讀取緩衝區以應對核心大量日誌
+          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=1024"
           
-          # [Time64] 關閉 Time64
+          # [Time64] 關閉
           force_config "CONFIG_TIME64" "# CONFIG_TIME64 is not set"
 
-          # 生成 Config (現在目錄對了，這步就會成功)
+          # 生成 Config
           yes "" | make oldconfig
           
           # 回寫 Config
@@ -166,25 +167,26 @@ jobs:
           cp -f .config ../config
 
           # =======================================================
-          # [CRITICAL] 2. 修正 Padavan 啟動參數 (V5 核心)
+          # [CRITICAL] 2. 注入雙重參數 (-C16 -K)
+          # -C16: 建立內存緩衝區 (給 logread 用)
+          # -K:   直接抓取核心訊息 (取代 klogd)
           # =======================================================
-          echo "🔧 [FIX] Patching Padavan Init Script (RC) to add -C flag..."
+          echo "🔧 [FIX] Patching Padavan Init Script (RC)..."
           
-          # 切換到 rc 目錄
           cd "$REPO_ROOT/trunk/user/rc"
-          
-          # 找到啟動 syslogd 的文件 (通常是 syslog.c)
           RC_FILE=$(grep -l '"syslogd"' *.c | head -n 1)
           
           if [ -n "$RC_FILE" ]; then
               echo "   -> Found init file: $RC_FILE"
-              # 替換指令：在 "syslogd", 後面插入 "-C16", 
-              sed -i 's/"syslogd",/"syslogd", "-C16",/' "$RC_FILE"
+              # 替換指令：插入 -C16 和 -K
+              # 原始: "syslogd",
+              # 目標: "syslogd", "-C16", "-K",
+              sed -i 's/"syslogd",/"syslogd", "-C16", "-K",/' "$RC_FILE"
               
-              echo "✅ Successfully injected -C16 flag into $RC_FILE"
-              grep "syslogd" "$RC_FILE" | grep "\-C16"
+              echo "✅ Successfully injected flags into $RC_FILE"
+              grep "syslogd" "$RC_FILE" | grep "\-K"
           else
-              echo "⚠️ Warning: Could not find syslogd launch code in RC!"
+              echo "⚠️ Warning: Could not find syslogd launch code!"
           fi
 
           # =======================================================
@@ -192,19 +194,17 @@ jobs:
           # =======================================================
           cd "$REPO_ROOT/trunk"
           
-          # 修改編譯腳本
           find . -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
              if grep -q 'busybox_id="1.24.x"' "$script"; then
                 sed -i 's/busybox_id="1.24.x"/busybox_id="1.37.0"/' "$script"
              fi
           done
 
-          # 修改 Makefile
           grep -rl "busybox-1.24.x" user/ | xargs -r sed -i "s/busybox-1.24.x/busybox-1.37.0/g"
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V5.1: Correct Path + Init Fix)."
+          echo "🎉 BusyBox 1.37.0 Ready (V5.2: The Unification)."
           echo "::endgroup::"
 
       # =======================================================
