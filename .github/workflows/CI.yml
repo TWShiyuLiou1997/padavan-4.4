@@ -96,7 +96,7 @@ jobs:
       # =======================================================
       # [步驟 B] BusyBox 1.37.0 V9: 極簡官方復刻版 (Verified)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V9: Official & Minimal)
+      - name: 🔥 Sync & Evolve BusyBox (V9:Official & Minimal)
         run: |
           set -x
           echo "::group::BusyBox Evolution V9"
