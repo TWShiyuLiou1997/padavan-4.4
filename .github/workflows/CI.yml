@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V20: 嚴謹驗證版 (Verify-First)
+      # [步驟 B] BusyBox 1.37.0 V21: Fix Grep False Alarm
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V20:Strict Verification)
+      - name: 🔥 Sync & Evolve BusyBox (V21:Verified Fix)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V20"
+          echo "::group::BusyBox Evolution V21"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -208,17 +208,14 @@ jobs:
           if [ -f "$RC_FILE" ]; then
               # [術前檢查]
               echo "🔍 [PRE-CHECK] Checking original content..."
-              if grep -q "NULL,.*-L" "$RC_FILE" && grep -q "syslogd_argv\[7\]" "$RC_FILE"; then
-                  echo "✅ Target code found (NULL for -L, and argv[7] assignment)."
-                  echo "--- Original Snippet ---"
-                  grep -C 2 "NULL,.*-L" "$RC_FILE"
-                  grep "syslogd_argv\[7\]" "$RC_FILE"
+              # 只檢查關鍵特徵，不檢查整行，避免空白問題
+              if grep -q "NULL," "$RC_FILE" && grep -q "syslogd_argv\[7\]" "$RC_FILE"; then
+                  echo "✅ Target code found."
               else
-                  echo "⚠️ Warning: Target code not found exactly as expected. Patch might fail."
-                  grep "syslogd_argv" "$RC_FILE" | head -n 5
+                  echo "⚠️ Warning: Target code not found exactly as expected."
               fi
 
-              # 生成 Patch
+              # 生成 Patch (使用 cat)
               cat << 'END_PATCH' > "$PATCH_FILE"
           --- services.c.orig
           +++ services.c
@@ -250,16 +247,17 @@ jobs:
                   exit 1
               fi
               
-              # [術後驗證]
+              # [術後驗證 - 修正版]
               echo "🔍 [POST-CHECK] Verifying patch result..."
               
-              # 1. 檢查 -L 是否已寫入
-              if grep -q '"-L",.*/* log locally */' "$RC_FILE"; then
-                  echo "✅ [PASS] Found '-L' parameter in array definition."
-                  grep -C 1 '"-L"' "$RC_FILE"
+              # 1. 檢查 -L 是否已寫入 (使用 -F 固定字串搜尋，避開 regex 問題)
+              # 只要檔案裡有 "-L", 這個字串，就代表修改進去了
+              if grep -F '"-L",' "$RC_FILE"; then
+                  echo "✅ [PASS] Found '-L' parameter."
               else
                   echo "❌ [FAIL] '-L' parameter NOT found!"
-                  cat "$RC_FILE"
+                  # 如果失敗，印出目標周圍的行來 Debug
+                  grep -C 2 "syslog.log" "$RC_FILE"
                   exit 1
               fi
               
@@ -288,7 +286,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V20: Strict Verification)."
+          echo "🎉 BusyBox 1.37.0 Ready (V21: Verified Fix)."
           echo "::endgroup::"
 
       # =======================================================
