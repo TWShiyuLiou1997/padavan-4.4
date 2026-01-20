@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V34: Omnipresent Config & Audit
+      # [步驟 B] BusyBox 1.37.0 V35: Trinity Sync & Audit
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V34:Omnipresent)
+      - name: 🔥 Sync & Evolve BusyBox (V35:Trinity Sync)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V34"
+          echo "::group::BusyBox Evolution V35"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -107,8 +107,13 @@ jobs:
           SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
           
+          # 定義三個關鍵同步目標
+          SYNC_TARGET_1="$TARGET_DIR/busybox-1.37.0/.config"
+          SYNC_TARGET_2="$TARGET_DIR/.config"
+          SYNC_TARGET_3="$ORIGINAL_CONFIG"
+
           # -------------------------------------------------------
-          # 定義檢查函式 (不直接退出，供自動修復使用)
+          # 檢查函式
           # -------------------------------------------------------
           check_config_val() {
               local KEY=$1
@@ -133,30 +138,22 @@ jobs:
               fi
           }
 
-          # =======================================================
-          # 1. [原始碼] 替換
-          # =======================================================
+          # 1. 原始碼替換
           echo "🏗️ [PHASE 1] Source Code Swap"
           rm -rf "$TARGET_DIR"
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # =======================================================
-          # 2. [CONFIG] 流程：初始化 -> 修改 -> 整合 -> 同步
-          # =======================================================
+          # 2. Config 處理
           echo "🔧 [PHASE 2] Config Evolution"
-          
-          # 2.1 載入原始設定
           cp -f "$ORIGINAL_CONFIG" .config
 
-          # 2.2 第一次 oldconfig (建立 1.37.0 結構，忽略錯誤)
+          # 2.1 初次 oldconfig
           yes "" | make oldconfig || true
 
-          # 2.3 強制修改 (注入 V26/V27 規格)
+          # 2.2 強制修改
           echo "   -> Injecting User Specifications..."
-          
-          # 清理舊設定
           sed -i '/CONFIG_ASH/d' .config
           sed -i '/CONFIG_HUSH/d' .config
           sed -i '/CONFIG_SH_IS/d' .config
@@ -184,7 +181,6 @@ jobs:
           sed -i '/CONFIG_NOLOGIN/d' .config
           sed -i '/CONFIG_NSENTER/d' .config
 
-          # 注入設定
           cat >> .config <<EOF
           # Shells
           CONFIG_SH_IS_ASH=y
@@ -243,19 +239,11 @@ jobs:
           # CONFIG_FEATURE_WGET_HTTPS is not set
           EOF
 
-          # 2.4 第二次 oldconfig (讓 BusyBox 消化我們注入的修改)
+          # 2.4 第二次 oldconfig
           yes "" | make oldconfig || true
 
-          # 2.5 [全域同步] 將此 Config 擴散到所有角落
-          echo "🌍 Propagating Config to all locations..."
-          cp -f .config "$ORIGINAL_CONFIG"
-          cp -f .config ../config
-          # 雙重保險：再複製一份到源頭
-          cp -f .config "$SOURCE_DIR/.config" 2>/dev/null || true
-
-          # 2.6 [FULL AUDIT] 嚴格驗證 (失敗自動補救)
+          # 2.5 [FULL AUDIT]
           echo "🔍 [AUDIT] Starting Configuration Audit..."
-          
           CHECKS=(
               "CONFIG_SH_IS_ASH y"
               "CONFIG_SYSLOGD y"
@@ -273,8 +261,6 @@ jobs:
           )
 
           FAIL_COUNT=0
-          
-          # 檢查並補救 Set 項目
           for ENTRY in "${CHECKS[@]}"; do
               KEY=${ENTRY%% *}
               VAL=${ENTRY#* }
@@ -286,7 +272,6 @@ jobs:
               fi
           done
           
-          # 檢查並補救 Unset 項目
           for KEY in "${UNSETS[@]}"; do
               if ! check_config_unset "$KEY"; then
                   echo "   ⚠️ $KEY should be unset. Fixing..."
@@ -299,30 +284,38 @@ jobs:
           # 最終生死判決
           if [ $FAIL_COUNT -gt 0 ]; then
               echo "   🔄 Re-verifying critical fixes..."
-              # 再次同步
-              cp -f .config "$ORIGINAL_CONFIG"
-              cp -f .config ../config
-              
-              # 驗證關鍵點 (Loop & Eth3)
               check_config_val "CONFIG_NO_LOOP_CONFIGURE" "y" || exit 1
               check_config_val "CONFIG_UDHCPC_DEFAULT_INTERFACE" '"eth3"' || exit 1
           fi
-
           echo "🎉 Config Audit Passed."
 
-          # =======================================================
-          # 3. [CODE] Services.c 修正
-          # =======================================================
-          echo "💉 [PHASE 3] Code Patching (services.c)"
+          # 2.6 [TRINITY SYNC] 三位一體同步 (關鍵修改)
+          echo "🌍 Executing Trinity Sync..."
+          echo "   1. Target (Build): $SYNC_TARGET_1"
+          echo "   2. Target (Backup): $SYNC_TARGET_2"
+          echo "   3. Source (Root): $SYNC_TARGET_3"
+          
+          # 因為我們現在就在 busybox-1.37.0 目錄下，.config 就是最新的
+          # 同步到上一層
+          cp -f .config "$SYNC_TARGET_2"
+          # 同步到原始路徑
+          cp -f .config "$SYNC_TARGET_3"
+          
+          # 驗證同步結果 (檢查其中一個關鍵值)
+          if grep -q "CONFIG_NO_LOOP_CONFIGURE=y" "$SYNC_TARGET_3"; then
+              echo "✅ Sync Verified: Root config updated successfully."
+          else
+              echo "❌ Sync Failed: Root config mismatch!"
+              exit 1
+          fi
+
+          # 3. Code Patching
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           PATCH_FILE="services_syslogd_fix.patch"
           
           if [ -f "$RC_FILE" ]; then
-              # 術前
               if grep -F "NULL,				/* -L */" "$RC_FILE"; then
-                  echo "   ✅ Found target code."
-                  # 應用 Patch
                   cat << 'END_PATCH' > "$PATCH_FILE"
           --- services.c.orig
           +++ services.c
@@ -348,7 +341,6 @@ jobs:
                   rm "$PATCH_FILE"
               fi
               
-              # 術後
               if grep -F '"-L",' "$RC_FILE" && ! grep -q 'syslogd_argv\[7\]' "$RC_FILE"; then
                   echo "   ✅ Patch Verified."
               else
@@ -357,15 +349,10 @@ jobs:
               fi
           fi
 
-          # =======================================================
-          # 4. [BUILD] 依賴與版本號修正
-          # =======================================================
-          echo "🧹 [PHASE 4] Build System Cleanup"
+          # 4. Build Cleanup
           cd "$REPO_ROOT/trunk"
-          
           grep -rl "busybox-1.24.x" user/ | xargs -r sed -i "s/busybox-1.24.x/busybox-1.37.0/g"
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
-          
           find . -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
              if grep -q 'busybox_id="1.24.x"' "$script"; then
                 sed -i 's/busybox_id="1.24.x"/busybox_id="1.37.0"/' "$script"
@@ -373,7 +360,6 @@ jobs:
              fi
           done
           
-          # 術後驗證
           if [ $(grep -r "busybox-1.24.x" user/ | wc -l) -eq 0 ]; then
               echo "   ✅ Build scripts clean."
           else
@@ -381,7 +367,7 @@ jobs:
           fi
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V34: Omnipresent)."
+          echo "🎉 BusyBox 1.37.0 Ready (V35: Trinity Sync)."
           echo "::endgroup::"
 
       # =======================================================
