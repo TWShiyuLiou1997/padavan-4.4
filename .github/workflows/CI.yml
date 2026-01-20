@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 安全相容版 (V6: Watchdog Safe)
+      # [步驟 B] BusyBox 1.37.0 V9: 極簡官方復刻版 (Verified)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (Safe Mode)
+      - name: 🔥 Sync & Evolve BusyBox (V9: Official & Minimal)
         run: |
           set -x
-          echo "::group::BusyBox Evolution"
+          echo "::group::BusyBox Evolution V9"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -107,28 +107,19 @@ jobs:
           SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
 
-          # 1. 替換原始碼
+          # 1. 替換原始碼 (升級到 1.37.0)
           rm -rf "$TARGET_DIR"
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
-          
-          # [PATH FIX] 進入正確的源碼目錄
           cd "$TARGET_DIR"
-          if [ -d "busybox-1.37.0" ]; then
-              cd "busybox-1.37.0"
-          fi
+          [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # 2. 繼承舊 Config
+          # 2. 繼承 Config (以 1.24.2 為基礎)
           if [ -f "$ORIGINAL_CONFIG" ]; then
               cp -f "$ORIGINAL_CONFIG" .config
           else
               echo "❌ Error: Original config not found!"
               exit 1
           fi
-          
-          # =======================================================
-          # [CRITICAL] 1. Config 回歸 1.24.2 架構 (確保 Watchdog 滿意)
-          # =======================================================
-          echo "🔧 [FIX] Restoring 1.24.2 Process Architecture..."
           
           force_config() {
               local key=$1
@@ -137,71 +128,95 @@ jobs:
               echo "$value" >> .config
           }
 
-          # [Reader] 1.37.0 必開，否則 logread 讀不到
-          force_config "CONFIG_LOGREAD" "CONFIG_LOGREAD=y"
+          # =======================================================
+          # [CONFIG] 1.24.2 原廠架構 (嚴格遵守您的分析)
+          # =======================================================
+          echo "🔧 [CONFIG] Applying strict 1.24.2 compatible config..."
           
-          # [Compatibility] 保持 KLOGD 開啟 (為了 Watchdog 安全)
+          # 1. 維持原廠設定 (Klogd, Syslogd)
           force_config "CONFIG_KLOGD" "CONFIG_KLOGD=y"
           force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "CONFIG_FEATURE_KLOGD_KLOGCTL=y"
-          
-          # [Compatibility] 關閉 KMSG_SYSLOG (避免跟 klogd 搶資源)
-          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "# CONFIG_FEATURE_KMSG_SYSLOG is not set"
-
-          # [Infrastructure] 基礎設施
           force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
-          force_config "CONFIG_FEATURE_Rotate_LOGFILE" "CONFIG_FEATURE_ROTATE_LOGFILE=y"
           force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
-          force_config "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=16"
-          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=1024"
-          force_config "CONFIG_TIME64" "# CONFIG_TIME64 is not set"
+          
+          # 2. 依照您的分析：LOGREAD 保持關閉 (相信原廠外部工具能讀)
+          force_config "CONFIG_LOGREAD" "# CONFIG_LOGREAD is not set"
+          
+          # 3. [OPTIONAL] 只開啟精確時間戳記 (優化項目)
+          force_config "CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS" "CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS=y"
 
+          # 更新 Config
           yes "" | make oldconfig
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
 
           # =======================================================
-          # [CRITICAL] 2. 最小化修正 services.c (只加 -C16)
+          # [CODE] Services.c 官方邏輯修正 (含術前術後檢查)
           # =======================================================
-          echo "🔧 [FIX] Patching Padavan Init Script (RC)..."
+          echo "🔧 [FIX] Patching services.c based on official fix..."
           
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           
           if [ -f "$RC_FILE" ]; then
-              echo "   -> Found init file: $RC_FILE"
+              echo "🔍 [PRE-CHECK] 術前檢查：確認原始狀態..."
+              echo "--- 1. 檢查參數定義 (預期看到 NULL) ---"
+              grep -C 2 "NULL,.*/* -L */" "$RC_FILE" || echo "⚠️ Warning: Target definition not found exactly as expected."
+              echo "--- 2. 檢查賦值邏輯 (預期看到 syslogd_argv[7] = \"-L\") ---"
+              grep "syslogd_argv\[7\]" "$RC_FILE" || echo "⚠️ Warning: Target assignment not found."
+
+              # ---------------------------------------------------
+              # 執行手術
+              # ---------------------------------------------------
+              echo "💉 [PATCHING] Executing sed modifications..."
               
-              # 唯一的修改：給 syslogd 加上 -C16 參數，讓它建立內存緩衝區
-              # 不動 klogd，不動 stop 函數，不動任何邏輯
-              # 原始: "/sbin/syslogd",
-              # 目標: "/sbin/syslogd", "-C16",
-              sed -i 's|"/sbin/syslogd",|"/sbin/syslogd", "-C16",|' "$RC_FILE"
+              # 1. 修改陣列定義：將 NULL 替換為 "-L"
+              # 原始: NULL,               /* -L */
+              # 目標: "-L",               /* log locally */
+              sed -i 's|NULL,.*/* -L */|"-L",\t\t\t\t/* log locally */|' "$RC_FILE"
               
-              echo "✅ Patching complete. Verifying result..."
-              grep -C 2 "/sbin/syslogd" "$RC_FILE"
+              # 2. 刪除多餘的賦值
+              # 刪除這一行: syslogd_argv[7] = "-L";
+              sed -i '/syslogd_argv\[7\] = "-L";/d' "$RC_FILE"
               
-              # 檢查是否不小心動到了 klogd (應該要保持原樣)
-              grep "start_klogd" "$RC_FILE"
+              # ---------------------------------------------------
+              # 術後驗證
+              # ---------------------------------------------------
+              echo "🔍 [POST-CHECK] 術後檢查：確認修改結果..."
+              
+              echo "--- 1. 檢查參數定義 (預期看到 \"-L\") ---"
+              grep -C 2 "\"-L\",.*/* log locally */" "$RC_FILE" && echo "✅ Definition Patch: SUCCESS" || echo "❌ Definition Patch: FAILED"
+              
+              echo "--- 2. 檢查賦值邏輯 (預期 syslogd_argv[7] 已消失) ---"
+              if grep -q "syslogd_argv\[7\]" "$RC_FILE"; then
+                  echo "❌ Assignment Patch: FAILED (Line still exists!)"
+                  grep "syslogd_argv\[7\]" "$RC_FILE"
+                  exit 1
+              else
+                  echo "✅ Assignment Patch: SUCCESS (Line removed)"
+              fi
+              
+              echo "--- 3. 檢查剩餘邏輯 (確認 [8] 和 [9] 依然存在) ---"
+              grep "syslogd_argv\[8\]" "$RC_FILE"
+              grep "syslogd_argv\[9\]" "$RC_FILE"
+
           else
               echo "❌ Error: services.c not found!"
               exit 1
           fi
 
-          # =======================================================
           # [Cleanup] 版本號修正
-          # =======================================================
           cd "$REPO_ROOT/trunk"
-          
           find . -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
              if grep -q 'busybox_id="1.24.x"' "$script"; then
                 sed -i 's/busybox_id="1.24.x"/busybox_id="1.37.0"/' "$script"
              fi
           done
-
           grep -rl "busybox-1.24.x" user/ | xargs -r sed -i "s/busybox-1.24.x/busybox-1.37.0/g"
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V6: Watchdog Safe Mode)."
+          echo "🎉 BusyBox 1.37.0 Ready (V9: Minimalist Official Logic)."
           echo "::endgroup::"
 
       # =======================================================
