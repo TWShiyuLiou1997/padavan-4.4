@@ -96,7 +96,7 @@ jobs:
       # =======================================================
       # [步驟 B] BusyBox 1.37.0 V10: 絕對暴力替換版 (Brute Force)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V10: Brute Force Fix)
+      - name: 🔥 Sync & Evolve BusyBox (V10:Brute Force Fix)
         run: |
           set -x
           echo "::group::BusyBox Evolution V10"
