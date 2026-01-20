@@ -94,9 +94,9 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 最終修正版 (V5.3: Precision Strike)
+      # [步驟 B] BusyBox 1.37.0 安全相容版 (V6: Watchdog Safe)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (Final Fix)
+      - name: 🔥 Sync & Evolve BusyBox (Safe Mode)
         run: |
           set -x
           echo "::group::BusyBox Evolution"
@@ -126,9 +126,9 @@ jobs:
           fi
           
           # =======================================================
-          # [CRITICAL] 1. Config 戰略調整 (二合一模式)
+          # [CRITICAL] 1. Config 回歸 1.24.2 架構 (確保 Watchdog 滿意)
           # =======================================================
-          echo "🔧 [FIX] Switching to Single-Process Log Strategy..."
+          echo "🔧 [FIX] Restoring 1.24.2 Process Architecture..."
           
           force_config() {
               local key=$1
@@ -137,15 +137,15 @@ jobs:
               echo "$value" >> .config
           }
 
-          # [Reader] 開啟 Logread
+          # [Reader] 1.37.0 必開，否則 logread 讀不到
           force_config "CONFIG_LOGREAD" "CONFIG_LOGREAD=y"
           
-          # [Strategy] 關閉 KLOGD (改用 syslogd -K)
-          force_config "CONFIG_KLOGD" "# CONFIG_KLOGD is not set"
-          force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "# CONFIG_FEATURE_KLOGD_KLOGCTL is not set"
+          # [Compatibility] 保持 KLOGD 開啟 (為了 Watchdog 安全)
+          force_config "CONFIG_KLOGD" "CONFIG_KLOGD=y"
+          force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "CONFIG_FEATURE_KLOGD_KLOGCTL=y"
           
-          # [Strategy] 開啟 KMSG_SYSLOG (syslogd 抓核心日誌)
-          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "CONFIG_FEATURE_KMSG_SYSLOG=y"
+          # [Compatibility] 關閉 KMSG_SYSLOG (避免跟 klogd 搶資源)
+          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "# CONFIG_FEATURE_KMSG_SYSLOG is not set"
 
           # [Infrastructure] 基礎設施
           force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
@@ -160,7 +160,7 @@ jobs:
           cp -f .config ../config
 
           # =======================================================
-          # [CRITICAL] 2. 修正 Padavan 啟動參數 (services.c)
+          # [CRITICAL] 2. 最小化修正 services.c (只加 -C16)
           # =======================================================
           echo "🔧 [FIX] Patching Padavan Init Script (RC)..."
           
@@ -170,20 +170,17 @@ jobs:
           if [ -f "$RC_FILE" ]; then
               echo "   -> Found init file: $RC_FILE"
               
-              # 1. 修正 start_syslogd (注入參數)
-              # 使用 | 作為分隔符，確保正確匹配
-              sed -i 's|"/sbin/syslogd",|"/sbin/syslogd", "-C16", "-K",|' "$RC_FILE"
+              # 唯一的修改：給 syslogd 加上 -C16 參數，讓它建立內存緩衝區
+              # 不動 klogd，不動 stop 函數，不動任何邏輯
+              # 原始: "/sbin/syslogd",
+              # 目標: "/sbin/syslogd", "-C16",
+              sed -i 's|"/sbin/syslogd",|"/sbin/syslogd", "-C16",|' "$RC_FILE"
               
-              # 2. 停用 start_klogd (防止報錯)
-              sed -i 's|return eval("/sbin/klogd");|return 0; // klogd disabled|' "$RC_FILE"
-              
-              # 3. 復原之前可能誤傷的 stop 函數 (確保代碼乾淨)
-              sed -i 's|"syslogd", "-C16", NULL|"syslogd", NULL|' "$RC_FILE"
-              sed -i 's|"syslogd", "-C16", "-K", NULL|"syslogd", NULL|' "$RC_FILE"
-
               echo "✅ Patching complete. Verifying result..."
               grep -C 2 "/sbin/syslogd" "$RC_FILE"
-              grep -C 1 "start_klogd" "$RC_FILE"
+              
+              # 檢查是否不小心動到了 klogd (應該要保持原樣)
+              grep "start_klogd" "$RC_FILE"
           else
               echo "❌ Error: services.c not found!"
               exit 1
@@ -204,7 +201,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V5.3: Precision Strike)."
+          echo "🎉 BusyBox 1.37.0 Ready (V6: Watchdog Safe Mode)."
           echo "::endgroup::"
 
       # =======================================================
