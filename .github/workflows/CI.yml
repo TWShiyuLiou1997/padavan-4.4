@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V12: 絕對穩健版 (No Fancy Sed)
+      # [步驟 B] BusyBox 1.37.0 V13: Patch 專用版 (Standard Way)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V12:Robust Fix)
+      - name: 🔥 Sync & Evolve BusyBox (V13: Standard Patching)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V12"
+          echo "::group::BusyBox Evolution V13"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -215,40 +215,62 @@ jobs:
           cp -f .config ../config
 
           # =======================================================
-          # [CODE] Services.c 修正 (使用最安全的 sed 語法)
+          # [CODE] 使用 Patch 工具修正 services.c
           # =======================================================
-          echo "🔧 [FIX] Patching services.c safely..."
+          echo "🔧 [FIX] Generating and applying unified patch for services.c..."
           
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
+          PATCH_FILE="services_syslogd_fix.patch"
           
           if [ -f "$RC_FILE" ]; then
-              # 1. 替換 NULL -> "-L"
-              # 策略：尋找包含 "/* -L */" 的行，將該行中的 "NULL," 替換為 "\"-L\","
-              # 使用 [[:space:]]* 來匹配任意空白字元，避開 TAB/空格問題
-              sed -i 's/NULL,[[:space:]]*\/\* -L \*\//"-L",\t\t\t\t\/* log locally *\//' "$RC_FILE"
-              
-              # 2. 刪除多餘賦值
-              # 直接刪除包含 syslogd_argv[7] = "-L" 的行
-              sed -i '/syslogd_argv\[7\] = "-L";/d' "$RC_FILE"
-              
-              # 3. 驗證
-              echo "🔍 [POST-CHECK] 最終驗證..."
-              
-              if grep -q '"-L",.*/* log locally */' "$RC_FILE"; then
-                  echo "✅ 參數定義修改成功！"
-                  grep '"-L"' "$RC_FILE"
+              # 產生 Patch 檔案 (這是基於您提供的 diff 製作的)
+              # 注意：Patch 內容對 TAB 縮排非常敏感，這裡使用 cat << 'END_PATCH' 確保格式原封不動
+              cat << 'END_PATCH' > "$PATCH_FILE"
+          --- services.c.orig	2026-01-21 00:00:00.000000000 +0000
+          +++ services.c	2026-01-21 00:00:00.000000000 +0000
+          @@ -55,7 +55,7 @@
+           		"-S",				/* smaller output */
+           		"-D",				/* drop duplicates */
+           		"-O", "/tmp/syslog.log",	/* syslog file */
+          -		NULL,				/* -L */
+          +		"-L",				/* log locally */
+           		NULL, NULL,			/* -R host:port */
+           		NULL
+           	};
+          @@ -65,7 +65,6 @@
+           	if (is_valid_ipv4(log_ipaddr)) {
+           		int log_port = nvram_safe_get_int("log_port", 514, 1, 65535);
+           		snprintf(host_dst, sizeof(host_dst), "%s:%d", log_ipaddr, log_port);
+          -		syslogd_argv[7] = "-L";		/* local & remote */
+           		syslogd_argv[8] = "-R";
+           		syslogd_argv[9] = host_dst;
+           	}
+          END_PATCH
+
+              # 套用 Patch
+              # -l: 忽略空白差異 (重要！)
+              # -F 5: 允許 5 行誤差
+              # -N: 如果已經 patch 過則跳過
+              echo "🩹 Applying Patch..."
+              if patch -l -F 5 -N < "$PATCH_FILE"; then
+                  echo "✅ Patch applied successfully!"
+                  rm "$PATCH_FILE"
               else
-                  echo "❌ 參數定義修改失敗！Dumping target line..."
-                  grep "/* -L */" "$RC_FILE"
+                  echo "❌ Patch failed!"
+                  # 如果失敗，嘗試顯示 services.c 的內容以便除錯
+                  echo "--- services.c content around target ---"
+                  grep -C 10 "start_syslogd" "$RC_FILE"
                   exit 1
               fi
               
-              if grep -q 'syslogd_argv\[7\] = "-L";' "$RC_FILE"; then
-                  echo "❌ 舊賦值代碼未刪除！"
-                  exit 1
+              # 驗證結果
+              echo "🔍 Verifying patch result..."
+              if grep -q '"-L",.*/* log locally */' "$RC_FILE" && ! grep -q 'syslogd_argv\[7\] = "-L";' "$RC_FILE"; then
+                  echo "✅ Verification Passed: Code is correctly patched!"
               else
-                  echo "✅ 舊賦值代碼已刪除！"
+                  echo "⚠️ Verification Failed!"
+                  exit 1
               fi
 
           else
@@ -267,7 +289,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V12: Robust Fix)."
+          echo "🎉 BusyBox 1.37.0 Ready (V13: Standard Patching)."
           echo "::endgroup::"
 
       # =======================================================
