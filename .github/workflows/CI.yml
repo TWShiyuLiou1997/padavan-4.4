@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V21: Fix Grep False Alarm
+      # [步驟 B] BusyBox 1.37.0 V22: Double Config + Strict Patch
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V21:Verified Fix)
+      - name: 🔥 Sync & Evolve BusyBox (V22:Final Polish)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V21"
+          echo "::group::BusyBox Evolution V22"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -114,7 +114,7 @@ jobs:
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
           # =======================================================
-          # [CONFIG] 階段：遷移與覆蓋
+          # [CONFIG] 階段：三步走 (升級 -> 覆蓋 -> 整合)
           # =======================================================
           echo "🔧 [CONFIG] Phase 1: Structure Migration..."
           
@@ -125,10 +125,10 @@ jobs:
               exit 1
           fi
 
-          # 允許 Broken pipe，目的是讓結構升級
+          # 1. 初次升級結構 (允許 Broken pipe)
           yes "" | make oldconfig || true
 
-          echo "🔧 [CONFIG] Phase 2: Force Overwrite & Verify..."
+          echo "🔧 [CONFIG] Phase 2: Force Overwrite..."
 
           # 清除衝突
           sed -i '/CONFIG_ASH/d' .config
@@ -183,6 +183,10 @@ jobs:
           CONFIG_LOGGER=y
           EOF
 
+          echo "🔧 [CONFIG] Phase 3: Final Integration (Digest changes)..."
+          # [關鍵] 再次執行 oldconfig，確保注入的設定被正確解析並補全依賴
+          yes "" | make oldconfig || true
+
           # [驗證 Config]
           echo "🔍 Verifying .config content..."
           if grep -q "CONFIG_SH_IS_ASH=y" .config && grep -q "CONFIG_SYSLOGD=y" .config; then
@@ -208,7 +212,6 @@ jobs:
           if [ -f "$RC_FILE" ]; then
               # [術前檢查]
               echo "🔍 [PRE-CHECK] Checking original content..."
-              # 只檢查關鍵特徵，不檢查整行，避免空白問題
               if grep -q "NULL," "$RC_FILE" && grep -q "syslogd_argv\[7\]" "$RC_FILE"; then
                   echo "✅ Target code found."
               else
@@ -247,16 +250,14 @@ jobs:
                   exit 1
               fi
               
-              # [術後驗證 - 修正版]
+              # [術後驗證 - 使用固定字串]
               echo "🔍 [POST-CHECK] Verifying patch result..."
               
-              # 1. 檢查 -L 是否已寫入 (使用 -F 固定字串搜尋，避開 regex 問題)
-              # 只要檔案裡有 "-L", 這個字串，就代表修改進去了
+              # 1. 檢查 -L 是否已寫入
               if grep -F '"-L",' "$RC_FILE"; then
                   echo "✅ [PASS] Found '-L' parameter."
               else
                   echo "❌ [FAIL] '-L' parameter NOT found!"
-                  # 如果失敗，印出目標周圍的行來 Debug
                   grep -C 2 "syslog.log" "$RC_FILE"
                   exit 1
               fi
@@ -286,7 +287,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V21: Verified Fix)."
+          echo "🎉 BusyBox 1.37.0 Ready (V22: Final Polish)."
           echo "::endgroup::"
 
       # =======================================================
