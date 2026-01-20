@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V9: 極簡官方復刻版 (Verified)
+      # [步驟 B] BusyBox 1.37.0 V10: 絕對暴力替換版 (Brute Force)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V9:Official & Minimal)
+      - name: 🔥 Sync & Evolve BusyBox (V10: Brute Force Fix)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V9"
+          echo "::group::BusyBox Evolution V10"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -113,92 +113,98 @@ jobs:
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # 2. 繼承 Config (以 1.24.2 為基礎)
-          if [ -f "$ORIGINAL_CONFIG" ]; then
-              cp -f "$ORIGINAL_CONFIG" .config
-          else
-              echo "❌ Error: Original config not found!"
-              exit 1
-          fi
+          # 2. Config 完全復原 (完全遵照您的指示，不加料)
+          # 注意：這裡假設 ORIGINAL_CONFIG 已經是您要的 1.24.2 內容
+          # 如果原本的檔案被之前的操作弄髒了，這裡會直接用 cat 重寫一份乾淨的
+          echo "🔧 [CONFIG] Overwriting .config with YOUR original content..."
           
+          cat > .config <<EOF
+          #
+          # System Logging Utilities
+          #
+          CONFIG_SYSLOGD=y
+          CONFIG_FEATURE_ROTATE_LOGFILE=y
+          CONFIG_FEATURE_REMOTE_LOG=y
+          CONFIG_FEATURE_SYSLOGD_DUP=y
+          # CONFIG_FEATURE_SYSLOGD_CFG is not set
+          CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512
+          CONFIG_FEATURE_IPC_SYSLOG=y
+          CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=4
+          # CONFIG_LOGREAD is not set
+          # CONFIG_FEATURE_LOGREAD_REDUCED_LOCKING is not set
+          # CONFIG_FEATURE_KMSG_SYSLOG is not set
+          CONFIG_KLOGD=y
+          CONFIG_FEATURE_KLOGD_KLOGCTL=y
+          CONFIG_LOGGER=y
+          EOF
+          
+          # 補上其他必要的基礎設定 (避免 make oldconfig 問太多問題)
+          # 這裡我們只追加上面這段 logging 設定到原始 config 的後面，或是合併
+          # 為了安全，我們還是用 cp ORIGINAL_CONFIG 然後再用 sed 確保這幾行是準的
+          
+          cp -f "$ORIGINAL_CONFIG" .config
+          
+          # 強制修正 Config 變數 (確保跟您要求的一模一樣)
           force_config() {
-              local key=$1
-              local value=$2
-              sed -i "/$key/d" .config
-              echo "$value" >> .config
+              sed -i "/$1/d" .config
+              echo "$2" >> .config
           }
-
-          # =======================================================
-          # [CONFIG] 1.24.2 原廠架構 (嚴格遵守您的分析)
-          # =======================================================
-          echo "🔧 [CONFIG] Applying strict 1.24.2 compatible config..."
           
-          # 1. 維持原廠設定 (Klogd, Syslogd)
+          force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
+          force_config "CONFIG_FEATURE_ROTATE_LOGFILE" "CONFIG_FEATURE_ROTATE_LOGFILE=y"
+          force_config "CONFIG_FEATURE_REMOTE_LOG" "CONFIG_FEATURE_REMOTE_LOG=y"
+          force_config "CONFIG_FEATURE_SYSLOGD_DUP" "CONFIG_FEATURE_SYSLOGD_DUP=y"
+          force_config "CONFIG_FEATURE_SYSLOGD_CFG" "# CONFIG_FEATURE_SYSLOGD_CFG is not set"
+          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512"
+          force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
+          force_config "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=4"
+          force_config "CONFIG_LOGREAD" "# CONFIG_LOGREAD is not set"
+          force_config "CONFIG_FEATURE_LOGREAD_REDUCED_LOCKING" "# CONFIG_FEATURE_LOGREAD_REDUCED_LOCKING is not set"
+          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "# CONFIG_FEATURE_KMSG_SYSLOG is not set"
           force_config "CONFIG_KLOGD" "CONFIG_KLOGD=y"
           force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "CONFIG_FEATURE_KLOGD_KLOGCTL=y"
-          force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
-          force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
-          
-          # 2. 依照您的分析：LOGREAD 保持關閉 (相信原廠外部工具能讀)
-          force_config "CONFIG_LOGREAD" "# CONFIG_LOGREAD is not set"
-          
-          # 3. [OPTIONAL] 只開啟精確時間戳記 (優化項目)
+          force_config "CONFIG_LOGGER" "CONFIG_LOGGER=y"
+          # [OPTIONAL] 只開啟精確時間戳記 (優化項目)
           force_config "CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS" "CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS=y"
 
-          # 更新 Config
           yes "" | make oldconfig
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
 
           # =======================================================
-          # [CODE] Services.c 官方邏輯修正 (含術前術後檢查)
+          # [CODE] Services.c 暴力替換法 (絕不失手)
           # =======================================================
-          echo "🔧 [FIX] Patching services.c based on official fix..."
+          echo "🔧 [FIX] Brutally replacing syslogd logic in services.c..."
           
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           
           if [ -f "$RC_FILE" ]; then
-              echo "🔍 [PRE-CHECK] 術前檢查：確認原始狀態..."
-              echo "--- 1. 檢查參數定義 (預期看到 NULL) ---"
-              grep -C 2 "NULL,.*/* -L */" "$RC_FILE" || echo "⚠️ Warning: Target definition not found exactly as expected."
-              echo "--- 2. 檢查賦值邏輯 (預期看到 syslogd_argv[7] = \"-L\") ---"
-              grep "syslogd_argv\[7\]" "$RC_FILE" || echo "⚠️ Warning: Target assignment not found."
-
-              # ---------------------------------------------------
-              # 執行手術
-              # ---------------------------------------------------
-              echo "💉 [PATCHING] Executing sed modifications..."
+              # 1. 使用 Perl 進行多行替換 (sed 對多行處理很弱)
+              # 我們匹配從 char *syslogd_argv[] 開始，一直到 }; 結束的整個區塊
+              # 然後直接換成我們準備好的「正確版本」
               
-              # 1. 修改陣列定義：將 NULL 替換為 "-L"
-              # 原始: NULL,               /* -L */
-              # 目標: "-L",               /* log locally */
-              sed -i 's|NULL,.*/* -L */|"-L",\t\t\t\t/* log locally */|' "$RC_FILE"
+              perl -i -0777 -pe 's/char \*syslogd_argv\[\] = \{.*?\};/char *syslogd_argv[] = {\n\t\t"\/sbin\/syslogd",\n\t\tlog_rot,\t\t\t\/* max size before rotation *\/\n\t\t"-b0",\t\t\t\t\/* purge on rotate *\/\n\t\t"-S",\t\t\t\t\/* smaller output *\/\n\t\t"-D",\t\t\t\t\/* drop duplicates *\/\n\t\t"-O", "\/tmp\/syslog.log",\t\/* syslog file *\/\n\t\t"-L",\t\t\t\t\/* log locally *\/\n\t\tNULL, NULL,\t\t\t\/* -R host:port *\/\n\t\tNULL\n\t};/gs' "$RC_FILE"
               
-              # 2. 刪除多餘的賦值
-              # 刪除這一行: syslogd_argv[7] = "-L";
+              # 2. 刪除多餘的賦值邏輯 (直接刪除那一行)
               sed -i '/syslogd_argv\[7\] = "-L";/d' "$RC_FILE"
               
-              # ---------------------------------------------------
-              # 術後驗證
-              # ---------------------------------------------------
-              echo "🔍 [POST-CHECK] 術後檢查：確認修改結果..."
-              
-              echo "--- 1. 檢查參數定義 (預期看到 \"-L\") ---"
-              grep -C 2 "\"-L\",.*/* log locally */" "$RC_FILE" && echo "✅ Definition Patch: SUCCESS" || echo "❌ Definition Patch: FAILED"
-              
-              echo "--- 2. 檢查賦值邏輯 (預期 syslogd_argv[7] 已消失) ---"
-              if grep -q "syslogd_argv\[7\]" "$RC_FILE"; then
-                  echo "❌ Assignment Patch: FAILED (Line still exists!)"
-                  grep "syslogd_argv\[7\]" "$RC_FILE"
-                  exit 1
+              # 3. 驗證
+              echo "🔍 [POST-CHECK] 驗證修改結果..."
+              if grep -q '"-L",.*/* log locally */' "$RC_FILE"; then
+                  echo "✅ 參數定義修改成功！"
               else
-                  echo "✅ Assignment Patch: SUCCESS (Line removed)"
+                  echo "❌ 參數定義修改失敗！Dumping file content..."
+                  cat "$RC_FILE"
+                  exit 1
               fi
               
-              echo "--- 3. 檢查剩餘邏輯 (確認 [8] 和 [9] 依然存在) ---"
-              grep "syslogd_argv\[8\]" "$RC_FILE"
-              grep "syslogd_argv\[9\]" "$RC_FILE"
+              if grep -q 'syslogd_argv\[7\] = "-L";' "$RC_FILE"; then
+                  echo "❌ 舊賦值代碼未刪除！"
+                  exit 1
+              else
+                  echo "✅ 舊賦值代碼已刪除！"
+              fi
 
           else
               echo "❌ Error: services.c not found!"
@@ -216,7 +222,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V9: Minimalist Official Logic)."
+          echo "🎉 BusyBox 1.37.0 Ready (V10: Brute Force Edition)."
           echo "::endgroup::"
 
       # =======================================================
