@@ -96,7 +96,7 @@ jobs:
       # =======================================================
       # [步驟 B] BusyBox 1.37.0 V13: Patch 專用版 (Standard Way)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V13: Standard Patching)
+      - name: 🔥 Sync & Evolve BusyBox (V13:Standard Patching)
         run: |
           set -x
           echo "::group::BusyBox Evolution V13"
