@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V10: 絕對暴力替換版 (Brute Force)
+      # [步驟 B] BusyBox 1.37.0 V11: 完美修復版 (Perfect Fix)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V10:Brute Force Fix)
+      - name: 🔥 Sync & Evolve BusyBox (V11:Config & Code Sync)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V10"
+          echo "::group::BusyBox Evolution V11"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -113,14 +113,86 @@ jobs:
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # 2. Config 完全復原 (完全遵照您的指示，不加料)
-          # 注意：這裡假設 ORIGINAL_CONFIG 已經是您要的 1.24.2 內容
-          # 如果原本的檔案被之前的操作弄髒了，這裡會直接用 cat 重寫一份乾淨的
-          echo "🔧 [CONFIG] Overwriting .config with YOUR original content..."
+          # 2. 處理 Config (解決 Broken pipe 與設定不一致)
+          echo "🔧 [CONFIG] Injecting strict Shells & Logging config..."
           
-          cat > .config <<EOF
+          if [ -f "$ORIGINAL_CONFIG" ]; then
+              cp -f "$ORIGINAL_CONFIG" .config
+          else
+              echo "❌ Error: Original config not found!"
+              exit 1
+          fi
+
+          # 清除舊的 Shells 和 Logging 設定 (避免重複)
+          sed -i '/^CONFIG_ASH/d' .config
+          sed -i '/^CONFIG_HUSH/d' .config
+          sed -i '/^CONFIG_SH_/d' .config
+          sed -i '/^CONFIG_FEATURE_SH_/d' .config
+          sed -i '/^CONFIG_FEATURE_BASH_/d' .config
+          sed -i '/^CONFIG_SYSLOGD/d' .config
+          sed -i '/^CONFIG_KLOGD/d' .config
+          sed -i '/^CONFIG_LOGGER/d' .config
+          sed -i '/^CONFIG_LOGREAD/d' .config
+          sed -i '/^CONFIG_FEATURE_ROTATE_LOGFILE/d' .config
+          sed -i '/^CONFIG_FEATURE_REMOTE_LOG/d' .config
+          sed -i '/^CONFIG_FEATURE_SYSLOGD/d' .config
+          sed -i '/^CONFIG_FEATURE_IPC_SYSLOG/d' .config
+          sed -i '/^CONFIG_FEATURE_KLOGD/d' .config
+          sed -i '/^CONFIG_FEATURE_KMSG_SYSLOG/d' .config
+
+          # 寫入您指定的完整設定 (Shells + Logging)
+          cat >> .config <<EOF
           #
-          # System Logging Utilities
+          # Shells (User Provided)
+          #
+          CONFIG_ASH=y
+          CONFIG_ASH_BASH_COMPAT=y
+          # CONFIG_ASH_IDLE_TIMEOUT is not set
+          CONFIG_ASH_JOB_CONTROL=y
+          CONFIG_ASH_ALIAS=y
+          CONFIG_ASH_GETOPTS=y
+          CONFIG_ASH_BUILTIN_ECHO=y
+          CONFIG_ASH_BUILTIN_PRINTF=y
+          CONFIG_ASH_BUILTIN_TEST=y
+          CONFIG_ASH_HELP=y
+          # CONFIG_ASH_CMDCMD is not set
+          # CONFIG_ASH_MAIL is not set
+          CONFIG_ASH_OPTIMIZE_FOR_SIZE=y
+          # CONFIG_ASH_RANDOM_SUPPORT is not set
+          CONFIG_ASH_EXPAND_PRMT=y
+          # CONFIG_CTTYHACK is not set
+          # CONFIG_HUSH is not set
+          # CONFIG_HUSH_BASH_COMPAT is not set
+          # CONFIG_HUSH_BRACE_EXPANSION is not set
+          # CONFIG_HUSH_HELP is not set
+          # CONFIG_HUSH_INTERACTIVE is not set
+          # CONFIG_HUSH_SAVEHISTORY is not set
+          # CONFIG_HUSH_JOB is not set
+          # CONFIG_HUSH_TICK is not set
+          # CONFIG_HUSH_IF is not set
+          # CONFIG_HUSH_LOOPS is not set
+          # CONFIG_HUSH_CASE is not set
+          # CONFIG_HUSH_FUNCTIONS is not set
+          # CONFIG_HUSH_LOCAL is not set
+          # CONFIG_HUSH_RANDOM_SUPPORT is not set
+          # CONFIG_HUSH_EXPORT_N is not set
+          # CONFIG_HUSH_MODE_X is not set
+          # CONFIG_MSH is not set
+          CONFIG_FEATURE_SH_IS_ASH=y
+          # CONFIG_FEATURE_SH_IS_HUSH is not set
+          # CONFIG_FEATURE_SH_IS_NONE is not set
+          CONFIG_FEATURE_BASH_IS_ASH=y
+          # CONFIG_FEATURE_BASH_IS_HUSH is not set
+          # CONFIG_FEATURE_BASH_IS_NONE is not set
+          CONFIG_SH_MATH_SUPPORT=y
+          # CONFIG_SH_MATH_SUPPORT_64 is not set
+          # CONFIG_FEATURE_SH_EXTRA_QUIET is not set
+          # CONFIG_FEATURE_SH_STANDALONE is not set
+          # CONFIG_FEATURE_SH_NOFORK is not set
+          # CONFIG_FEATURE_SH_HISTFILESIZE is not set
+          
+          #
+          # System Logging Utilities (User Provided)
           #
           CONFIG_SYSLOGD=y
           CONFIG_FEATURE_ROTATE_LOGFILE=y
@@ -137,73 +209,51 @@ jobs:
           CONFIG_FEATURE_KLOGD_KLOGCTL=y
           CONFIG_LOGGER=y
           EOF
-          
-          # 補上其他必要的基礎設定 (避免 make oldconfig 問太多問題)
-          # 這裡我們只追加上面這段 logging 設定到原始 config 的後面，或是合併
-          # 為了安全，我們還是用 cp ORIGINAL_CONFIG 然後再用 sed 確保這幾行是準的
-          
-          cp -f "$ORIGINAL_CONFIG" .config
-          
-          # 強制修正 Config 變數 (確保跟您要求的一模一樣)
-          force_config() {
-              sed -i "/$1/d" .config
-              echo "$2" >> .config
-          }
-          
-          force_config "CONFIG_SYSLOGD" "CONFIG_SYSLOGD=y"
-          force_config "CONFIG_FEATURE_ROTATE_LOGFILE" "CONFIG_FEATURE_ROTATE_LOGFILE=y"
-          force_config "CONFIG_FEATURE_REMOTE_LOG" "CONFIG_FEATURE_REMOTE_LOG=y"
-          force_config "CONFIG_FEATURE_SYSLOGD_DUP" "CONFIG_FEATURE_SYSLOGD_DUP=y"
-          force_config "CONFIG_FEATURE_SYSLOGD_CFG" "# CONFIG_FEATURE_SYSLOGD_CFG is not set"
-          force_config "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE" "CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512"
-          force_config "CONFIG_FEATURE_IPC_SYSLOG" "CONFIG_FEATURE_IPC_SYSLOG=y"
-          force_config "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=4"
-          force_config "CONFIG_LOGREAD" "# CONFIG_LOGREAD is not set"
-          force_config "CONFIG_FEATURE_LOGREAD_REDUCED_LOCKING" "# CONFIG_FEATURE_LOGREAD_REDUCED_LOCKING is not set"
-          force_config "CONFIG_FEATURE_KMSG_SYSLOG" "# CONFIG_FEATURE_KMSG_SYSLOG is not set"
-          force_config "CONFIG_KLOGD" "CONFIG_KLOGD=y"
-          force_config "CONFIG_FEATURE_KLOGD_KLOGCTL" "CONFIG_FEATURE_KLOGD_KLOGCTL=y"
-          force_config "CONFIG_LOGGER" "CONFIG_LOGGER=y"
-          # [OPTIONAL] 只開啟精確時間戳記 (優化項目)
-          force_config "CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS" "CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS=y"
 
+          # 更新設定 (現在應該不會報 Broken pipe 了)
           yes "" | make oldconfig
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
 
           # =======================================================
-          # [CODE] Services.c 暴力替換法 (絕不失手)
+          # [CODE] Services.c 精準行替換 (Targeted Line Replacement)
           # =======================================================
-          echo "🔧 [FIX] Brutally replacing syslogd logic in services.c..."
+          echo "🔧 [FIX] Patching services.c with line-targeting strategy..."
           
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           
           if [ -f "$RC_FILE" ]; then
-              # 1. 使用 Perl 進行多行替換 (sed 對多行處理很弱)
-              # 我們匹配從 char *syslogd_argv[] 開始，一直到 }; 結束的整個區塊
-              # 然後直接換成我們準備好的「正確版本」
+              # 策略：不匹配 NULL，直接匹配 "/* -L */" 這個註解，因為它是唯一的
+              # 使用 sed 的 'c' 指令直接把整行換掉
               
-              perl -i -0777 -pe 's/char \*syslogd_argv\[\] = \{.*?\};/char *syslogd_argv[] = {\n\t\t"\/sbin\/syslogd",\n\t\tlog_rot,\t\t\t\/* max size before rotation *\/\n\t\t"-b0",\t\t\t\t\/* purge on rotate *\/\n\t\t"-S",\t\t\t\t\/* smaller output *\/\n\t\t"-D",\t\t\t\t\/* drop duplicates *\/\n\t\t"-O", "\/tmp\/syslog.log",\t\/* syslog file *\/\n\t\t"-L",\t\t\t\t\/* log locally *\/\n\t\tNULL, NULL,\t\t\t\/* -R host:port *\/\n\t\tNULL\n\t};/gs' "$RC_FILE"
+              echo "1. Replacing array definition line..."
+              # 匹配包含 "/* -L */" 的行，整行替換為目標代碼
+              sed -i '/\/\* -L \*\//c\		"-L",\t\t\t\t/* log locally */' "$RC_FILE"
               
-              # 2. 刪除多餘的賦值邏輯 (直接刪除那一行)
+              echo "2. Removing redundant assignment..."
+              # 刪除包含 syslogd_argv[7] = "-L" 的行
               sed -i '/syslogd_argv\[7\] = "-L";/d' "$RC_FILE"
               
               # 3. 驗證
-              echo "🔍 [POST-CHECK] 驗證修改結果..."
+              echo "🔍 [POST-CHECK] 最終驗證..."
+              
+              # 檢查定義
               if grep -q '"-L",.*/* log locally */' "$RC_FILE"; then
                   echo "✅ 參數定義修改成功！"
+                  grep -C 2 '"-L",.*/* log locally */' "$RC_FILE"
               else
-                  echo "❌ 參數定義修改失敗！Dumping file content..."
+                  echo "❌ 參數定義修改失敗！無法找到目標行。"
                   cat "$RC_FILE"
                   exit 1
               fi
               
+              # 檢查賦值
               if grep -q 'syslogd_argv\[7\] = "-L";' "$RC_FILE"; then
                   echo "❌ 舊賦值代碼未刪除！"
                   exit 1
               else
-                  echo "✅ 舊賦值代碼已刪除！"
+                  echo "✅ 舊賦值代碼已成功刪除！"
               fi
 
           else
@@ -222,7 +272,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V10: Brute Force Edition)."
+          echo "🎉 BusyBox 1.37.0 Ready (V11: Perfect Fix)."
           echo "::endgroup::"
 
       # =======================================================
