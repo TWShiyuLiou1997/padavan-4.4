@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V13: Patch 專用版 (Standard Way)
+      # [步驟 B] BusyBox 1.37.0 V14: 最終完美版 (Config + Patch)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V13:Standard Patching)
+      - name: 🔥 Sync & Evolve BusyBox (V14:Perfect Sync)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V13"
+          echo "::group::BusyBox Evolution V14"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -113,8 +113,8 @@ jobs:
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # 2. 處理 Config (解決 Broken pipe)
-          echo "🔧 [CONFIG] Injecting strict Shells & Logging config..."
+          # 2. Config 處理 (關鍵修正)
+          echo "🔧 [CONFIG] Preparing config based on 1.24.2 original..."
           
           if [ -f "$ORIGINAL_CONFIG" ]; then
               cp -f "$ORIGINAL_CONFIG" .config
@@ -123,77 +123,47 @@ jobs:
               exit 1
           fi
 
-          # 清除舊設定
-          sed -i '/^CONFIG_ASH/d' .config
-          sed -i '/^CONFIG_HUSH/d' .config
-          sed -i '/^CONFIG_SH_/d' .config
-          sed -i '/^CONFIG_FEATURE_SH_/d' .config
-          sed -i '/^CONFIG_FEATURE_BASH_/d' .config
-          sed -i '/^CONFIG_SYSLOGD/d' .config
-          sed -i '/^CONFIG_KLOGD/d' .config
-          sed -i '/^CONFIG_LOGGER/d' .config
-          sed -i '/^CONFIG_LOGREAD/d' .config
-          sed -i '/^CONFIG_FEATURE_ROTATE_LOGFILE/d' .config
-          sed -i '/^CONFIG_FEATURE_REMOTE_LOG/d' .config
-          sed -i '/^CONFIG_FEATURE_SYSLOGD/d' .config
-          sed -i '/^CONFIG_FEATURE_IPC_SYSLOG/d' .config
-          sed -i '/^CONFIG_FEATURE_KLOGD/d' .config
-          sed -i '/^CONFIG_FEATURE_KMSG_SYSLOG/d' .config
-
-          # 注入完整設定
+          # [CONFIG FIX] 解決 Broken Pipe 的核心
+          # 新版 BusyBox 需要明確指定 Shell Alias 選項，否則 make oldconfig 會卡住
+          # 我們預先寫入這些選項，讓它自動通過
+          
+          # 1. 移除舊的 Shell 設定 (避免衝突)
+          sed -i '/CONFIG_ASH/d' .config
+          sed -i '/CONFIG_HUSH/d' .config
+          sed -i '/CONFIG_SH_IS/d' .config
+          sed -i '/CONFIG_BASH_IS/d' .config
+          
+          # 2. 注入相容 1.37.0 的 Shell 設定
           cat >> .config <<EOF
-          #
-          # Shells (User Provided)
-          #
+          # Shell Selection (Auto-injected for 1.37.0)
+          CONFIG_SH_IS_ASH=y
+          # CONFIG_SH_IS_HUSH is not set
+          # CONFIG_SH_IS_NONE is not set
+          CONFIG_BASH_IS_ASH=y
+          # CONFIG_BASH_IS_HUSH is not set
+          # CONFIG_BASH_IS_NONE is not set
           CONFIG_ASH=y
+          CONFIG_ASH_OPTIMIZE_FOR_SIZE=y
+          CONFIG_ASH_INTERNAL_GLOB=y
           CONFIG_ASH_BASH_COMPAT=y
-          # CONFIG_ASH_IDLE_TIMEOUT is not set
           CONFIG_ASH_JOB_CONTROL=y
           CONFIG_ASH_ALIAS=y
-          CONFIG_ASH_GETOPTS=y
-          CONFIG_ASH_BUILTIN_ECHO=y
-          CONFIG_ASH_BUILTIN_PRINTF=y
-          CONFIG_ASH_BUILTIN_TEST=y
-          CONFIG_ASH_HELP=y
-          # CONFIG_ASH_CMDCMD is not set
-          # CONFIG_ASH_MAIL is not set
-          CONFIG_ASH_OPTIMIZE_FOR_SIZE=y
-          # CONFIG_ASH_RANDOM_SUPPORT is not set
           CONFIG_ASH_EXPAND_PRMT=y
-          # CONFIG_CTTYHACK is not set
-          # CONFIG_HUSH is not set
-          # CONFIG_HUSH_BASH_COMPAT is not set
-          # CONFIG_HUSH_BRACE_EXPANSION is not set
-          # CONFIG_HUSH_HELP is not set
-          # CONFIG_HUSH_INTERACTIVE is not set
-          # CONFIG_HUSH_SAVEHISTORY is not set
-          # CONFIG_HUSH_JOB is not set
-          # CONFIG_HUSH_TICK is not set
-          # CONFIG_HUSH_IF is not set
-          # CONFIG_HUSH_LOOPS is not set
-          # CONFIG_HUSH_CASE is not set
-          # CONFIG_HUSH_FUNCTIONS is not set
-          # CONFIG_HUSH_LOCAL is not set
-          # CONFIG_HUSH_RANDOM_SUPPORT is not set
-          # CONFIG_HUSH_EXPORT_N is not set
-          # CONFIG_HUSH_MODE_X is not set
-          # CONFIG_MSH is not set
-          CONFIG_FEATURE_SH_IS_ASH=y
-          # CONFIG_FEATURE_SH_IS_HUSH is not set
-          # CONFIG_FEATURE_SH_IS_NONE is not set
-          CONFIG_FEATURE_BASH_IS_ASH=y
-          # CONFIG_FEATURE_BASH_IS_HUSH is not set
-          # CONFIG_FEATURE_BASH_IS_NONE is not set
-          CONFIG_SH_MATH_SUPPORT=y
-          # CONFIG_SH_MATH_SUPPORT_64 is not set
-          # CONFIG_FEATURE_SH_EXTRA_QUIET is not set
-          # CONFIG_FEATURE_SH_STANDALONE is not set
-          # CONFIG_FEATURE_SH_NOFORK is not set
-          # CONFIG_FEATURE_SH_HISTFILESIZE is not set
+          CONFIG_ASH_GETOPTS=y
+          CONFIG_ASH_CMDCMD=y
+          CONFIG_ASH_HELP=y
+          EOF
+
+          # 3. 注入 Logging 設定 (確保符合您的要求)
+          # 先移除舊設定
+          sed -i '/CONFIG_SYSLOGD/d' .config
+          sed -i '/CONFIG_KLOGD/d' .config
+          sed -i '/CONFIG_LOGGER/d' .config
+          sed -i '/CONFIG_LOGREAD/d' .config
           
-          #
-          # System Logging Utilities (User Provided)
-          #
+          # 注入新設定 (完全照您給的 1.24.2 規格)
+          cat >> .config <<EOF
+          # System Logging (Restored to 1.24.2 specs)
           CONFIG_SYSLOGD=y
           CONFIG_FEATURE_ROTATE_LOGFILE=y
           CONFIG_FEATURE_REMOTE_LOG=y
@@ -210,6 +180,7 @@ jobs:
           CONFIG_LOGGER=y
           EOF
 
+          # 執行更新 (現在應該會順利通過)
           yes "" | make oldconfig
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
@@ -225,10 +196,9 @@ jobs:
           
           if [ -f "$RC_FILE" ]; then
               # 產生 Patch 檔案 (這是基於您提供的 diff 製作的)
-              # 注意：Patch 內容對 TAB 縮排非常敏感，這裡使用 cat << 'END_PATCH' 確保格式原封不動
               cat << 'END_PATCH' > "$PATCH_FILE"
-          --- services.c.orig	2026-01-21 00:00:00.000000000 +0000
-          +++ services.c	2026-01-21 00:00:00.000000000 +0000
+          --- services.c.orig
+          +++ services.c
           @@ -55,7 +55,7 @@
            		"-S",				/* smaller output */
            		"-D",				/* drop duplicates */
@@ -249,17 +219,13 @@ jobs:
           END_PATCH
 
               # 套用 Patch
-              # -l: 忽略空白差異 (重要！)
-              # -F 5: 允許 5 行誤差
-              # -N: 如果已經 patch 過則跳過
               echo "🩹 Applying Patch..."
               if patch -l -F 5 -N < "$PATCH_FILE"; then
                   echo "✅ Patch applied successfully!"
                   rm "$PATCH_FILE"
               else
                   echo "❌ Patch failed!"
-                  # 如果失敗，嘗試顯示 services.c 的內容以便除錯
-                  echo "--- services.c content around target ---"
+                  # 如果失敗，顯示 context 以便除錯
                   grep -C 10 "start_syslogd" "$RC_FILE"
                   exit 1
               fi
@@ -289,7 +255,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V13: Standard Patching)."
+          echo "🎉 BusyBox 1.37.0 Ready (V14: Perfect Sync)."
           echo "::endgroup::"
 
       # =======================================================
