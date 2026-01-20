@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V11: 完美修復版 (Perfect Fix)
+      # [步驟 B] BusyBox 1.37.0 V12: 絕對穩健版 (No Fancy Sed)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V11:Config & Code Sync)
+      - name: 🔥 Sync & Evolve BusyBox (V12:Robust Fix)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V11"
+          echo "::group::BusyBox Evolution V12"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -113,7 +113,7 @@ jobs:
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # 2. 處理 Config (解決 Broken pipe 與設定不一致)
+          # 2. 處理 Config (解決 Broken pipe)
           echo "🔧 [CONFIG] Injecting strict Shells & Logging config..."
           
           if [ -f "$ORIGINAL_CONFIG" ]; then
@@ -123,7 +123,7 @@ jobs:
               exit 1
           fi
 
-          # 清除舊的 Shells 和 Logging 設定 (避免重複)
+          # 清除舊設定
           sed -i '/^CONFIG_ASH/d' .config
           sed -i '/^CONFIG_HUSH/d' .config
           sed -i '/^CONFIG_SH_/d' .config
@@ -140,7 +140,7 @@ jobs:
           sed -i '/^CONFIG_FEATURE_KLOGD/d' .config
           sed -i '/^CONFIG_FEATURE_KMSG_SYSLOG/d' .config
 
-          # 寫入您指定的完整設定 (Shells + Logging)
+          # 注入完整設定
           cat >> .config <<EOF
           #
           # Shells (User Provided)
@@ -210,50 +210,45 @@ jobs:
           CONFIG_LOGGER=y
           EOF
 
-          # 更新設定 (現在應該不會報 Broken pipe 了)
           yes "" | make oldconfig
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
 
           # =======================================================
-          # [CODE] Services.c 精準行替換 (Targeted Line Replacement)
+          # [CODE] Services.c 修正 (使用最安全的 sed 語法)
           # =======================================================
-          echo "🔧 [FIX] Patching services.c with line-targeting strategy..."
+          echo "🔧 [FIX] Patching services.c safely..."
           
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           
           if [ -f "$RC_FILE" ]; then
-              # 策略：不匹配 NULL，直接匹配 "/* -L */" 這個註解，因為它是唯一的
-              # 使用 sed 的 'c' 指令直接把整行換掉
+              # 1. 替換 NULL -> "-L"
+              # 策略：尋找包含 "/* -L */" 的行，將該行中的 "NULL," 替換為 "\"-L\","
+              # 使用 [[:space:]]* 來匹配任意空白字元，避開 TAB/空格問題
+              sed -i 's/NULL,[[:space:]]*\/\* -L \*\//"-L",\t\t\t\t\/* log locally *\//' "$RC_FILE"
               
-              echo "1. Replacing array definition line..."
-              # 匹配包含 "/* -L */" 的行，整行替換為目標代碼
-              sed -i '/\/\* -L \*\//c\		"-L",\t\t\t\t/* log locally */' "$RC_FILE"
-              
-              echo "2. Removing redundant assignment..."
-              # 刪除包含 syslogd_argv[7] = "-L" 的行
+              # 2. 刪除多餘賦值
+              # 直接刪除包含 syslogd_argv[7] = "-L" 的行
               sed -i '/syslogd_argv\[7\] = "-L";/d' "$RC_FILE"
               
               # 3. 驗證
               echo "🔍 [POST-CHECK] 最終驗證..."
               
-              # 檢查定義
               if grep -q '"-L",.*/* log locally */' "$RC_FILE"; then
                   echo "✅ 參數定義修改成功！"
-                  grep -C 2 '"-L",.*/* log locally */' "$RC_FILE"
+                  grep '"-L"' "$RC_FILE"
               else
-                  echo "❌ 參數定義修改失敗！無法找到目標行。"
-                  cat "$RC_FILE"
+                  echo "❌ 參數定義修改失敗！Dumping target line..."
+                  grep "/* -L */" "$RC_FILE"
                   exit 1
               fi
               
-              # 檢查賦值
               if grep -q 'syslogd_argv\[7\] = "-L";' "$RC_FILE"; then
                   echo "❌ 舊賦值代碼未刪除！"
                   exit 1
               else
-                  echo "✅ 舊賦值代碼已成功刪除！"
+                  echo "✅ 舊賦值代碼已刪除！"
               fi
 
           else
@@ -272,7 +267,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V11: Perfect Fix)."
+          echo "🎉 BusyBox 1.37.0 Ready (V12: Robust Fix)."
           echo "::endgroup::"
 
       # =======================================================
