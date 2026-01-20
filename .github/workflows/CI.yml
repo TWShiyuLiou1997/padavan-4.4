@@ -94,12 +94,12 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V16: Patch + Config Fix + Loose Verify
+      # [步驟 B] BusyBox 1.37.0 V20: 嚴謹驗證版 (Verify-First)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V16:The Real Deal)
+      - name: 🔥 Sync & Evolve BusyBox (V20:Strict Verification)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V16"
+          echo "::group::BusyBox Evolution V20"
           
           # 定義路徑
           REPO_ROOT="/opt/rt-n56u"
@@ -107,14 +107,16 @@ jobs:
           SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
 
-          # 1. 替換原始碼 (升級到 1.37.0)
+          # 1. 替換原始碼
           rm -rf "$TARGET_DIR"
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # 2. Config 處理 (修復 Broken Pipe 關鍵)
-          echo "🔧 [CONFIG] Injecting strict Shells & Logging config..."
+          # =======================================================
+          # [CONFIG] 階段：遷移與覆蓋
+          # =======================================================
+          echo "🔧 [CONFIG] Phase 1: Structure Migration..."
           
           if [ -f "$ORIGINAL_CONFIG" ]; then
               cp -f "$ORIGINAL_CONFIG" .config
@@ -123,7 +125,12 @@ jobs:
               exit 1
           fi
 
-          # 清除可能衝突的舊設定
+          # 允許 Broken pipe，目的是讓結構升級
+          yes "" | make oldconfig || true
+
+          echo "🔧 [CONFIG] Phase 2: Force Overwrite & Verify..."
+
+          # 清除衝突
           sed -i '/CONFIG_ASH/d' .config
           sed -i '/CONFIG_HUSH/d' .config
           sed -i '/CONFIG_SH_IS/d' .config
@@ -132,10 +139,16 @@ jobs:
           sed -i '/CONFIG_KLOGD/d' .config
           sed -i '/CONFIG_LOGGER/d' .config
           sed -i '/CONFIG_LOGREAD/d' .config
-          
-          # 注入完整設定 (包含 Shell 選擇，防止問答卡死)
+          sed -i '/CONFIG_FEATURE_ROTATE_LOGFILE/d' .config
+          sed -i '/CONFIG_FEATURE_REMOTE_LOG/d' .config
+          sed -i '/CONFIG_FEATURE_SYSLOGD/d' .config
+          sed -i '/CONFIG_FEATURE_IPC_SYSLOG/d' .config
+          sed -i '/CONFIG_FEATURE_KLOGD/d' .config
+          sed -i '/CONFIG_FEATURE_KMSG_SYSLOG/d' .config
+
+          # 注入設定
           cat >> .config <<EOF
-          # Shell Selection (Auto-select ASH for 1.37.0)
+          # Shell Selection
           CONFIG_SH_IS_ASH=y
           # CONFIG_SH_IS_HUSH is not set
           # CONFIG_SH_IS_NONE is not set
@@ -153,7 +166,7 @@ jobs:
           CONFIG_ASH_CMDCMD=y
           CONFIG_ASH_HELP=y
           
-          # System Logging (Restored to 1.24.2 specs)
+          # System Logging
           CONFIG_SYSLOGD=y
           CONFIG_FEATURE_ROTATE_LOGFILE=y
           CONFIG_FEATURE_REMOTE_LOG=y
@@ -170,24 +183,42 @@ jobs:
           CONFIG_LOGGER=y
           EOF
 
-          # [CRITICAL FIX] 使用 'yes 1' 解決 Broken Pipe
-          # 遇到選單時自動選擇第一個選項 (通常是 ASH)
-          yes "1" | make oldconfig
-          
+          # [驗證 Config]
+          echo "🔍 Verifying .config content..."
+          if grep -q "CONFIG_SH_IS_ASH=y" .config && grep -q "CONFIG_SYSLOGD=y" .config; then
+              echo "✅ Config injection verified."
+          else
+              echo "❌ Config injection failed!"
+              tail -n 20 .config
+              exit 1
+          fi
+
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
 
           # =======================================================
-          # [CODE] 使用 Patch 工具修正 services.c
+          # [CODE] 階段：Services.c 修正
           # =======================================================
-          echo "🔧 [FIX] Generating and applying unified patch for services.c..."
+          echo "🔧 [FIX] Generating unified patch for services.c..."
           
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           PATCH_FILE="services_syslogd_fix.patch"
           
           if [ -f "$RC_FILE" ]; then
-              # 產生 Patch 檔案 (這是基於您提供的 diff 製作的)
+              # [術前檢查]
+              echo "🔍 [PRE-CHECK] Checking original content..."
+              if grep -q "NULL,.*-L" "$RC_FILE" && grep -q "syslogd_argv\[7\]" "$RC_FILE"; then
+                  echo "✅ Target code found (NULL for -L, and argv[7] assignment)."
+                  echo "--- Original Snippet ---"
+                  grep -C 2 "NULL,.*-L" "$RC_FILE"
+                  grep "syslogd_argv\[7\]" "$RC_FILE"
+              else
+                  echo "⚠️ Warning: Target code not found exactly as expected. Patch might fail."
+                  grep "syslogd_argv" "$RC_FILE" | head -n 5
+              fi
+
+              # 生成 Patch
               cat << 'END_PATCH' > "$PATCH_FILE"
           --- services.c.orig
           +++ services.c
@@ -210,37 +241,35 @@ jobs:
            	}
           END_PATCH
 
-              # 套用 Patch
               echo "🩹 Applying Patch..."
-              # -l: 忽略空白差異, -F 5: 寬容行號誤差, -N: 跳過已應用
               if patch -l -F 5 -N < "$PATCH_FILE"; then
                   echo "✅ Patch applied successfully!"
                   rm "$PATCH_FILE"
               else
                   echo "❌ Patch failed!"
-                  # 如果失敗，顯示 context 以便除錯
-                  grep -C 10 "start_syslogd" "$RC_FILE"
                   exit 1
               fi
               
-              # 驗證結果 (Loose Verify)
-              echo "🔍 Verifying patch result (Loose Check)..."
+              # [術後驗證]
+              echo "🔍 [POST-CHECK] Verifying patch result..."
               
-              # 檢查 "-L" 是否存在 (只要有這個字串就算成功)
-              if grep -q '"-L"' "$RC_FILE"; then
-                  echo "✅ Parameter (-L) found in code."
+              # 1. 檢查 -L 是否已寫入
+              if grep -q '"-L",.*/* log locally */' "$RC_FILE"; then
+                  echo "✅ [PASS] Found '-L' parameter in array definition."
+                  grep -C 1 '"-L"' "$RC_FILE"
               else
-                  echo "❌ Parameter (-L) NOT found!"
+                  echo "❌ [FAIL] '-L' parameter NOT found!"
                   cat "$RC_FILE"
                   exit 1
               fi
               
-              # 檢查舊賦值是否消失
+              # 2. 檢查舊賦值是否已移除
               if grep -q 'syslogd_argv\[7\]' "$RC_FILE"; then
-                  echo "❌ Old assignment (argv[7]) still exists!"
+                  echo "❌ [FAIL] Old assignment (argv[7]) still exists!"
+                  grep "syslogd_argv\[7\]" "$RC_FILE"
                   exit 1
               else
-                  echo "✅ Old assignment removed successfully."
+                  echo "✅ [PASS] Old assignment (argv[7]) successfully removed."
               fi
 
           else
@@ -259,7 +288,7 @@ jobs:
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V16: Real Deal)."
+          echo "🎉 BusyBox 1.37.0 Ready (V20: Strict Verification)."
           echo "::endgroup::"
 
       # =======================================================
