@@ -94,29 +94,66 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V22: Double Config + Strict Patch
+      # [步驟 B] BusyBox 1.37.0 V29: Total Audit & Precision
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V22:Final Polish)
+      - name: 🔥 Sync & Evolve BusyBox (V29:Total Audit)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V22"
+          echo "::group::BusyBox Evolution V29"
           
-          # 定義路徑
+          # 定義變數與路徑
           REPO_ROOT="/opt/rt-n56u"
           ORIGINAL_CONFIG="$REPO_ROOT/trunk/configs/boards/busybox.config"
           SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
+          
+          # -------------------------------------------------------
+          # 定義嚴格檢查函式 (Check Function)
+          # -------------------------------------------------------
+          check_config_val() {
+              local KEY=$1
+              local EXPECT=$2
+              # 使用 grep 精確匹配整行設定
+              if grep -q "^${KEY}=${EXPECT}$" .config; then
+                  echo "   ✅ [PASS] ${KEY} is correctly set to ${EXPECT}"
+              else
+                  echo "   ❌ [FAIL] ${KEY} mismatch! Expected: ${EXPECT}"
+                  grep "^${KEY}" .config || echo "          (Key not found in file)"
+                  exit 1
+              fi
+          }
 
-          # 1. 替換原始碼
+          check_config_unset() {
+              local KEY=$1
+              # 檢查是否被註解掉 (is not set)
+              if grep -q "# ${KEY} is not set" .config; then
+                  echo "   ✅ [PASS] ${KEY} is correctly UNSET"
+              else
+                  echo "   ❌ [FAIL] ${KEY} should be unset but isn't!"
+                  grep "${KEY}" .config || echo "          (Key not found in file)"
+                  exit 1
+              fi
+          }
+
+          # =======================================================
+          # 1. [原始碼] 替換與驗證
+          # =======================================================
+          echo "🏗️ [PHASE 1] Source Code Swap"
           rm -rf "$TARGET_DIR"
           cp -rf "$SOURCE_DIR" "$TARGET_DIR"
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
+          
+          # [POST-CHECK] 驗證目錄
+          if [ "$(basename $(pwd))" != "busybox-1.37.0" ]; then
+              echo "❌ Source directory incorrect!"
+              exit 1
+          fi
 
           # =======================================================
-          # [CONFIG] 階段：三步走 (升級 -> 覆蓋 -> 整合)
+          # 2. [CONFIG] 結構升級與參數注入
           # =======================================================
-          echo "🔧 [CONFIG] Phase 1: Structure Migration..."
+          echo "🔧 [PHASE 2] Config Evolution & Injection"
           
           if [ -f "$ORIGINAL_CONFIG" ]; then
               cp -f "$ORIGINAL_CONFIG" .config
@@ -125,12 +162,12 @@ jobs:
               exit 1
           fi
 
-          # 1. 初次升級結構 (允許 Broken pipe)
+          # 2.1 初次 oldconfig (建立結構)
+          echo "   -> Running initial oldconfig..."
           yes "" | make oldconfig || true
 
-          echo "🔧 [CONFIG] Phase 2: Force Overwrite..."
-
-          # 清除衝突
+          # 2.2 執行清理 (sed) - 擴大清理範圍
+          echo "   -> Cleaning conflicting options..."
           sed -i '/CONFIG_ASH/d' .config
           sed -i '/CONFIG_HUSH/d' .config
           sed -i '/CONFIG_SH_IS/d' .config
@@ -145,10 +182,27 @@ jobs:
           sed -i '/CONFIG_FEATURE_IPC_SYSLOG/d' .config
           sed -i '/CONFIG_FEATURE_KLOGD/d' .config
           sed -i '/CONFIG_FEATURE_KMSG_SYSLOG/d' .config
+          
+          sed -i '/CONFIG_UDHCPC_DEFAULT_INTERFACE/d' .config
+          sed -i '/CONFIG_FEATURE_IP_ROUTE_DIR/d' .config
+          sed -i '/CONFIG_SHA1_SMALL/d' .config
+          sed -i '/CONFIG_WGET/d' .config
+          sed -i '/CONFIG_FEATURE_WGET/d' .config
+          
+          sed -i '/CONFIG_LOOP_CONFIGURE/d' .config
+          sed -i '/CONFIG_FEATURE_TAR_LONG_OPTIONS/d' .config
+          sed -i '/CONFIG_FEATURE_SORT_OPTIMIZE_MEMORY/d' .config
+          sed -i '/CONFIG_FLOAT_DURATION/d' .config
+          sed -i '/CONFIG_FEATURE_SHOW_SCRIPT/d' .config
+          sed -i '/CONFIG_NOLOGIN/d' .config
+          sed -i '/CONFIG_NSENTER/d' .config
 
-          # 注入設定
+          # 2.3 執行注入 (V26 規格)
+          echo "   -> Injecting Custom Parameters..."
           cat >> .config <<EOF
-          # Shell Selection
+          #
+          # [CRITICAL] Shell Fix (ASH only, NO HUSH)
+          #
           CONFIG_SH_IS_ASH=y
           # CONFIG_SH_IS_HUSH is not set
           # CONFIG_SH_IS_NONE is not set
@@ -165,60 +219,117 @@ jobs:
           CONFIG_ASH_GETOPTS=y
           CONFIG_ASH_CMDCMD=y
           CONFIG_ASH_HELP=y
+          # CONFIG_HUSH is not set
           
-          # System Logging
+          #
+          # [LOGGING] Precise Timestamps
+          #
           CONFIG_SYSLOGD=y
           CONFIG_FEATURE_ROTATE_LOGFILE=y
           CONFIG_FEATURE_REMOTE_LOG=y
           CONFIG_FEATURE_SYSLOGD_DUP=y
-          # CONFIG_FEATURE_SYSLOGD_CFG is not set
+          CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS=y
           CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512
           CONFIG_FEATURE_IPC_SYSLOG=y
           CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=4
-          # CONFIG_LOGREAD is not set
-          # CONFIG_FEATURE_LOGREAD_REDUCED_LOCKING is not set
-          # CONFIG_FEATURE_KMSG_SYSLOG is not set
           CONFIG_KLOGD=y
           CONFIG_FEATURE_KLOGD_KLOGCTL=y
           CONFIG_LOGGER=y
+
+          #
+          # [DEV FIXES] Hardware & Protocol
+          #
+          CONFIG_UDHCPC_DEFAULT_INTERFACE="eth3"
+          CONFIG_FEATURE_IP_ROUTE_DIR=""
+          CONFIG_SHA1_SMALL=1
+          CONFIG_NO_LOOP_CONFIGURE=y
+          # CONFIG_TRY_LOOP_CONFIGURE is not set
+          
+          #
+          # [USER PREFERENCES] Tools & Features
+          #
+          CONFIG_FEATURE_TAR_LONG_OPTIONS=y
+          CONFIG_FEATURE_SORT_OPTIMIZE_MEMORY=y
+          CONFIG_FEATURE_SHOW_SCRIPT=y
+          CONFIG_FLOAT_DURATION=y
+          CONFIG_NOLOGIN=y
+          CONFIG_NSENTER=y
+          
+          #
+          # [MINIMALIST] NO FTP
+          #
+          CONFIG_WGET=y
+          CONFIG_FEATURE_WGET_LONG_OPTIONS=y
+          CONFIG_FEATURE_WGET_STATUSBAR=y
+          CONFIG_FEATURE_WGET_AUTHENTICATION=y
+          CONFIG_FEATURE_WGET_TIMEOUT=y
+          # CONFIG_FEATURE_WGET_FTP is not set
+          # CONFIG_FEATURE_WGET_HTTPS is not set
           EOF
 
-          echo "🔧 [CONFIG] Phase 3: Final Integration (Digest changes)..."
-          # [關鍵] 再次執行 oldconfig，確保注入的設定被正確解析並補全依賴
+          # 2.4 最終整合
+          echo "   -> Finalizing config with oldconfig..."
           yes "" | make oldconfig || true
 
-          # [驗證 Config]
-          echo "🔍 Verifying .config content..."
-          if grep -q "CONFIG_SH_IS_ASH=y" .config && grep -q "CONFIG_SYSLOGD=y" .config; then
-              echo "✅ Config injection verified."
-          else
-              echo "❌ Config injection failed!"
-              tail -n 20 .config
-              exit 1
-          fi
+          # 2.5 [POST-CHECK] 逐項嚴格驗證 (Audit Mode)
+          echo "🔍 [AUDIT] Starting Full Configuration Audit..."
+          
+          # --- Group 1: Shells ---
+          check_config_val "CONFIG_SH_IS_ASH" "y"
+          check_config_unset "CONFIG_SH_IS_HUSH"
+          check_config_val "CONFIG_ASH" "y"
+          check_config_unset "CONFIG_HUSH"
 
+          # --- Group 2: Logging ---
+          check_config_val "CONFIG_SYSLOGD" "y"
+          check_config_val "CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS" "y"
+          check_config_val "CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE" "4"
+
+          # --- Group 3: Dev Fixes ---
+          check_config_val "CONFIG_UDHCPC_DEFAULT_INTERFACE" '"eth3"'
+          check_config_val "CONFIG_FEATURE_IP_ROUTE_DIR" '""'
+          check_config_val "CONFIG_SHA1_SMALL" "1"
+          check_config_val "CONFIG_NO_LOOP_CONFIGURE" "y"
+          check_config_unset "CONFIG_TRY_LOOP_CONFIGURE"
+
+          # --- Group 4: User Prefs ---
+          check_config_val "CONFIG_FEATURE_TAR_LONG_OPTIONS" "y"
+          check_config_val "CONFIG_FEATURE_SORT_OPTIMIZE_MEMORY" "y"
+          check_config_val "CONFIG_FEATURE_SHOW_SCRIPT" "y"
+          check_config_val "CONFIG_NOLOGIN" "y"
+          check_config_val "CONFIG_NSENTER" "y"
+
+          # --- Group 5: Minimalist (No FTP) ---
+          check_config_val "CONFIG_WGET" "y"
+          check_config_unset "CONFIG_FEATURE_WGET_FTP"
+
+          echo "🎉 All Config Checks PASSED."
+
+          # 回寫
           cp -f .config "$ORIGINAL_CONFIG"
           cp -f .config ../config
 
           # =======================================================
-          # [CODE] 階段：Services.c 修正
+          # 3. [CODE] Services.c 修正
           # =======================================================
-          echo "🔧 [FIX] Generating unified patch for services.c..."
+          echo "💉 [PHASE 3] Code Patching (services.c)"
           
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           PATCH_FILE="services_syslogd_fix.patch"
           
           if [ -f "$RC_FILE" ]; then
-              # [術前檢查]
-              echo "🔍 [PRE-CHECK] Checking original content..."
-              if grep -q "NULL," "$RC_FILE" && grep -q "syslogd_argv\[7\]" "$RC_FILE"; then
-                  echo "✅ Target code found."
+              # 3.1 [PRE-CHECK] 術前檢查
+              echo "🔍 [PRE-CHECK] Looking for target code block..."
+              
+              if grep -F "NULL,				/* -L */" "$RC_FILE"; then
+                  echo "   ✅ Found target line: NULL, /* -L */"
               else
-                  echo "⚠️ Warning: Target code not found exactly as expected."
+                  echo "   ⚠️ Target line 'NULL, /* -L */' NOT found. Context:"
+                  grep -C 2 "\-L" "$RC_FILE" || true
               fi
 
-              # 生成 Patch (使用 cat)
+              # 3.2 應用 Patch
               cat << 'END_PATCH' > "$PATCH_FILE"
           --- services.c.orig
           +++ services.c
@@ -241,34 +352,30 @@ jobs:
            	}
           END_PATCH
 
-              echo "🩹 Applying Patch..."
+              echo "   -> Applying Patch..."
               if patch -l -F 5 -N < "$PATCH_FILE"; then
-                  echo "✅ Patch applied successfully!"
+                  echo "   ✅ Patch applied successfully!"
                   rm "$PATCH_FILE"
               else
-                  echo "❌ Patch failed!"
+                  echo "   ❌ Patch failed! Aborting."
                   exit 1
               fi
               
-              # [術後驗證 - 使用固定字串]
-              echo "🔍 [POST-CHECK] Verifying patch result..."
+              # 3.3 [POST-CHECK] 術後驗證
+              echo "🔍 [POST-CHECK] Verifying services.c changes..."
               
-              # 1. 檢查 -L 是否已寫入
               if grep -F '"-L",' "$RC_FILE"; then
-                  echo "✅ [PASS] Found '-L' parameter."
+                  echo "   ✅ [PASS] Found '-L' parameter in array."
               else
-                  echo "❌ [FAIL] '-L' parameter NOT found!"
-                  grep -C 2 "syslog.log" "$RC_FILE"
+                  echo "   ❌ [FAIL] '-L' parameter NOT found!"
                   exit 1
               fi
               
-              # 2. 檢查舊賦值是否已移除
               if grep -q 'syslogd_argv\[7\]' "$RC_FILE"; then
-                  echo "❌ [FAIL] Old assignment (argv[7]) still exists!"
-                  grep "syslogd_argv\[7\]" "$RC_FILE"
+                  echo "   ❌ [FAIL] Old assignment (argv[7]) still exists!"
                   exit 1
               else
-                  echo "✅ [PASS] Old assignment (argv[7]) successfully removed."
+                  echo "   ✅ [PASS] Old assignment (argv[7]) successfully removed."
               fi
 
           else
@@ -276,18 +383,38 @@ jobs:
               exit 1
           fi
 
-          # [Cleanup] 版本號修正
+          # =======================================================
+          # 4. [BUILD] 依賴與版本號修正
+          # =======================================================
+          echo "🧹 [PHASE 4] Build System Cleanup"
           cd "$REPO_ROOT/trunk"
+          
+          # 4.1 [PRE-CHECK]
+          echo "🔍 [PRE-CHECK] Scanning for old version strings..."
+          grep -rl "busybox-1.24.x" user/ | head -n 5 || echo "   (None found)"
+          
+          # 4.2 修正
+          echo "   -> Patching scripts..."
           find . -maxdepth 1 -name "*.sh" -o -name "build_firmware*" | while read -r script; do
              if grep -q 'busybox_id="1.24.x"' "$script"; then
                 sed -i 's/busybox_id="1.24.x"/busybox_id="1.37.0"/' "$script"
+                echo "   -> Updated $script"
              fi
           done
           grep -rl "busybox-1.24.x" user/ | xargs -r sed -i "s/busybox-1.24.x/busybox-1.37.0/g"
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
 
+          # 4.3 [POST-CHECK]
+          echo "🔍 [POST-CHECK] Verifying cleanup..."
+          REMAINING=$(grep -r "busybox-1.24.x" user/ | wc -l)
+          if [ "$REMAINING" -eq 0 ]; then
+             echo "✅ Cleanup Successful."
+          else
+             echo "⚠️ Warning: $REMAINING files still contain 'busybox-1.24.x'"
+          fi
+
           set +x
-          echo "🎉 BusyBox 1.37.0 Ready (V22: Final Polish)."
+          echo "🎉 BusyBox 1.37.0 Evolution Complete (V29: Total Audit)."
           echo "::endgroup::"
 
       # =======================================================
