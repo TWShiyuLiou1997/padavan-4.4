@@ -94,25 +94,29 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V40: Ironclad Gatekeeper
+      # [步驟 B] BusyBox 1.37.0 V41: Ultimate Fortress (Full Audit^3)
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V40:Ironclad)
+      - name: 🔥 Sync & Evolve BusyBox (V41:Ultimate Fortress)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V40"
+          echo "::group::BusyBox Evolution V41"
           
-          # 定義變數與路徑
-          REPO_ROOT="/opt/rt-n56u"
-          ORIGINAL_CONFIG="$REPO_ROOT/trunk/configs/boards/busybox.config"
-          SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
-          TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
+          # 定義變數與路徑 (使用 readonly 防止意外修改)
+          readonly REPO_ROOT="/opt/rt-n56u"
+          readonly ORIGINAL_CONFIG="$REPO_ROOT/trunk/configs/boards/busybox.config"
+          readonly SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
+          readonly TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
           
-          # 定義同步目標
-          TARGETS=(
-              "$TARGET_DIR/busybox-1.37.0/.config"
-              "$TARGET_DIR/.config"
-              "$ORIGINAL_CONFIG"
-          )
+          # 定義同步目標 (明確展開，避免陣列解析問題)
+          readonly SYNC_TARGET_1="$TARGET_DIR/busybox-1.37.0/.config"
+          readonly SYNC_TARGET_2="$TARGET_DIR/.config"
+          readonly SYNC_TARGET_3="$ORIGINAL_CONFIG"
+          
+          # 檢查路徑變數是否有效
+          if [ -z "$SYNC_TARGET_2" ] || [ -z "$SYNC_TARGET_3" ]; then
+              echo "❌ CRITICAL ERROR: Target paths are empty!"
+              exit 1
+          fi
 
           # -------------------------------------------------------
           # 定義全套檢查清單 (40項)
@@ -178,14 +182,16 @@ jobs:
           # -------------------------------------------------------
           # 核心驗證函式 (Audit Core)
           # -------------------------------------------------------
-          # 回傳 0: 通過
-          # 回傳 1: 失敗 (並將失敗項目寫入指定陣列名稱)
           audit_config() {
               local FILE=$1
-              local LIST_NAME=$2 # 用來存失敗項目的變數名稱
+              local LIST_NAME=$2 
               local FAILURES=()
               
               echo "   🔍 Auditing $FILE..."
+              if [ ! -f "$FILE" ]; then
+                  echo "      ❌ File not found: $FILE"
+                  return 1
+              fi
               
               # Check Sets
               for ENTRY in "${CHECKS_SET[@]}"; do
@@ -205,7 +211,6 @@ jobs:
                   fi
               done
               
-              # 如果有失敗，導出到外部變數
               if [ ${#FAILURES[@]} -gt 0 ]; then
                   eval "$LIST_NAME=(\"\${FAILURES[@]}\")"
                   return 1
@@ -218,7 +223,7 @@ jobs:
           # -------------------------------------------------------
           apply_fixes() {
               local FILE=$1
-              local ITEMS=("${@:2}") # 接收陣列
+              local ITEMS=("${@:2}")
               
               echo "   🛠️ Applying Fixes to $FILE..."
               for ITEM in "${ITEMS[@]}"; do
@@ -252,7 +257,7 @@ jobs:
           echo "🔧 [PHASE 2] Config Evolution"
           cp -f "$ORIGINAL_CONFIG" .config
           
-          # 2.1 Clean & Inject (預防性清理)
+          # 2.1 Clean & Inject
           for KEY in "${CHECKS_UNSET[@]}"; do sed -i "/$KEY/d" .config; done
           for ENTRY in "${CHECKS_SET[@]}"; do KEY=${ENTRY%% *}; sed -i "/$KEY/d" .config; done
           
@@ -309,59 +314,63 @@ jobs:
           yes "" | make oldconfig || true
 
           # =======================================================
-          # 3. [IRONCLAD AUDIT LOOP] 驗證、修復、再驗證 (三輪生死戰)
+          # 3. [IRONCLAD AUDIT LOOP] 驗證當前 .config
           # =======================================================
-          echo "🔍 [PHASE 3] Ironclad Audit Loop"
-          CURRENT_FILE=".config" # 我們現在只針對當前編譯目錄驗證，確認無誤才同步
+          echo "🔍 [PHASE 3] Ironclad Audit Loop (Current)"
+          CURRENT_FILE=".config"
           
-          # --- Round 1 ---
+          # Round 1
           FAIL_LIST_1=()
           if ! audit_config "$CURRENT_FILE" FAIL_LIST_1; then
-              echo "⚠️ Round 1 Failed. Issues found: ${#FAIL_LIST_1[@]}"
+              echo "⚠️ Round 1 Failed. Issues: ${#FAIL_LIST_1[@]}"
               apply_fixes "$CURRENT_FILE" "${FAIL_LIST_1[@]}"
           else
               echo "✅ Round 1 Passed Perfect."
           fi
           
-          # --- Round 2 (Check Round 1 Fixes) ---
+          # Round 2
           FAIL_LIST_2=()
           if ! audit_config "$CURRENT_FILE" FAIL_LIST_2; then
-              echo "⚠️ Round 2 Failed. Remaining issues: ${#FAIL_LIST_2[@]}"
+              echo "⚠️ Round 2 Failed. Issues: ${#FAIL_LIST_2[@]}"
               apply_fixes "$CURRENT_FILE" "${FAIL_LIST_2[@]}"
           else
               echo "✅ Round 2 Passed."
           fi
           
-          # --- Round 3 (Final Death Check) ---
+          # Round 3 (Death Check)
           FAIL_LIST_3=()
           if ! audit_config "$CURRENT_FILE" FAIL_LIST_3; then
-              echo "⛔ FATAL: Round 3 Failed! The config refuses to be fixed."
-              echo "   Unresolved Issues:"
+              echo "⛔ FATAL: Round 3 Failed!"
               printf '%s\n' "${FAIL_LIST_3[@]}"
-              echo "🚫 GATE CLOSED: Sync will NOT proceed."
+              echo "🚫 GATE CLOSED."
               exit 1
           fi
-          
-          echo "✅ Round 3 Passed. Config is 100% clean."
+          echo "✅ Round 3 Passed. Config is clean."
 
           # =======================================================
-          # 4. [SYNC GATE] 只有通過上述考驗才能執行
+          # 4. [SYNC GATE & FULL VERIFY] 同步後全目標大體檢
           # =======================================================
-          echo "🌍 [PHASE 4] Executing Sync Gate..."
-          echo "   -> Source verified. Propagating to all targets..."
+          echo "🌍 [PHASE 4] Executing Sync & Full Verify..."
           
+          echo "   -> Propagating to $SYNC_TARGET_2"
           cp -f .config "$SYNC_TARGET_2"
+          echo "   -> Propagating to $SYNC_TARGET_3"
           cp -f .config "$SYNC_TARGET_3"
           
-          # 最終全域一致性檢查 (Final Consistency Check)
-          echo "   🔍 Verifying propagated files..."
-          for TARGET in "${TARGETS[@]}"; do
+          # 定義目標陣列 (這裡重新定義，確保變數已展開)
+          ALL_TARGETS=("$SYNC_TARGET_1" "$SYNC_TARGET_2" "$SYNC_TARGET_3")
+          
+          echo "   🔍 Verifying ALL propagated files (Full Audit)..."
+          for TARGET in "${ALL_TARGETS[@]}"; do
               if ! audit_config "$TARGET" JUNK_VAR; then
-                  echo "❌ Sync Verification Failed for $TARGET!"
+                  echo "❌ FATAL: Verification Failed for $TARGET!"
+                  # 這裡是最後一道防線，如果同步過去的檔案有問題，必須停止
                   exit 1
+              else
+                  echo "✅ Verified: $TARGET"
               fi
           done
-          echo "✅ All targets synced and verified."
+          echo "✅ All targets synced and fully verified."
 
           # =======================================================
           # 5. [CODE & BUILD] 程式碼與依賴驗證
@@ -422,7 +431,7 @@ jobs:
           echo "✅ Build System Verified."
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Evolution Complete (V40: Ironclad Gatekeeper)."
+          echo "🎉 BusyBox 1.37.0 Evolution Complete (V41: Ultimate Fortress)."
           echo "::endgroup::"
 
       # =======================================================
