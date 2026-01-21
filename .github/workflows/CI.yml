@@ -94,34 +94,33 @@ jobs:
           echo "::endgroup::"
 
       # =======================================================
-      # [步驟 B] BusyBox 1.37.0 V41: Ultimate Fortress (Full Audit^3)
+      # [步驟 B] BusyBox 1.37.0 V43: Perfectionist + Logic Upgrade
       # =======================================================
-      - name: 🔥 Sync & Evolve BusyBox (V41:Ultimate Fortress)
+      - name: 🔥 Sync & Evolve BusyBox (V43:Ultimate Logic)
         run: |
           set -x
-          echo "::group::BusyBox Evolution V41"
+          echo "::group::BusyBox Evolution V43"
           
-          # 定義變數與路徑 (使用 readonly 防止意外修改)
+          # 1. 定義變數 (Readonly 防止篡改)
           readonly REPO_ROOT="/opt/rt-n56u"
           readonly ORIGINAL_CONFIG="$REPO_ROOT/trunk/configs/boards/busybox.config"
           readonly SOURCE_DIR="/tmp/padavan-ng/trunk/user/busybox"
           readonly TARGET_DIR="$REPO_ROOT/trunk/user/busybox"
           
-          # 定義同步目標 (明確展開，避免陣列解析問題)
           readonly SYNC_TARGET_1="$TARGET_DIR/busybox-1.37.0/.config"
           readonly SYNC_TARGET_2="$TARGET_DIR/.config"
           readonly SYNC_TARGET_3="$ORIGINAL_CONFIG"
           
-          # 檢查路徑變數是否有效
-          if [ -z "$SYNC_TARGET_2" ] || [ -z "$SYNC_TARGET_3" ]; then
-              echo "❌ CRITICAL ERROR: Target paths are empty!"
+          if [ -z "$SYNC_TARGET_1" ] || [ -z "$SYNC_TARGET_2" ] || [ -z "$SYNC_TARGET_3" ]; then
+              echo "❌ CRITICAL: Target paths are empty!"
               exit 1
           fi
 
           # -------------------------------------------------------
-          # 定義全套檢查清單 (40項)
+          # 2. 定義全套檢查清單 (擴充至 60+ 項)
           # -------------------------------------------------------
           CHECKS_SET=(
+              # Shells
               "CONFIG_SH_IS_ASH y"
               "CONFIG_BASH_IS_ASH y"
               "CONFIG_ASH y"
@@ -134,7 +133,13 @@ jobs:
               "CONFIG_ASH_GETOPTS y"
               "CONFIG_ASH_CMDCMD y"
               "CONFIG_ASH_HELP y"
+              "CONFIG_ASH_RANDOM_SUPPORT y"
+              "CONFIG_ASH_IDLE_TIMEOUT y"
+              "CONFIG_ASH_MAIL y"
+              "CONFIG_FEATURE_SH_MATH_BASE y"
+              "CONFIG_FEATURE_SH_EMBEDDED_SCRIPTS y"
               
+              # Logging
               "CONFIG_SYSLOGD y"
               "CONFIG_FEATURE_ROTATE_LOGFILE y"
               "CONFIG_FEATURE_REMOTE_LOG y"
@@ -147,24 +152,122 @@ jobs:
               "CONFIG_FEATURE_KLOGD_KLOGCTL y"
               "CONFIG_LOGGER y"
               
+              # Network & DHCP
               "CONFIG_UDHCPC_DEFAULT_INTERFACE \"eth3\""
               "CONFIG_FEATURE_IP_ROUTE_DIR \"\""
               "CONFIG_SHA1_SMALL 1"
               "CONFIG_DHCP6C y"
-              "CONFIG_NO_LOOP_CONFIGURE y"
+              "CONFIG_FEATURE_UDHCPC_SANITIZEOPT y"
+              "CONFIG_FEATURE_UDHCP_RFC3397 y"
+              "CONFIG_FEATURE_UDHCP_RFC5969 y"
+              "CONFIG_IPNEIGH y"
+              "CONFIG_FEATURE_IP_NEIGH y"
+              "CONFIG_NC y"
+              "CONFIG_NC_SERVER y"
+              "CONFIG_NC_EXTRA y"
+              "CONFIG_FEATURE_NSLOOKUP_BIG y"
+              "CONFIG_FEATURE_NSLOOKUP_LONG_OPTIONS y"
+              "CONFIG_FEATURE_NTP_AUTH y"
+              "CONFIG_SSL_CLIENT y"
+              "CONFIG_TC y"
+              "CONFIG_FEATURE_TC_INGRESS y"
+              "CONFIG_TLS y"
+              "CONFIG_SVC y"
+              "CONFIG_SVOK y"
               
+              # WGET (Upgrade to HTTPS)
+              "CONFIG_WGET y"
+              "CONFIG_FEATURE_WGET_LONG_OPTIONS y"
+              "CONFIG_FEATURE_WGET_STATUSBAR y"
+              "CONFIG_FEATURE_WGET_AUTHENTICATION y"
+              "CONFIG_FEATURE_WGET_TIMEOUT y"
+              "CONFIG_FEATURE_WGET_HTTPS y"
+              "CONFIG_FEATURE_WGET_OPENSSL y"
+              
+              # Loop & Core
+              "CONFIG_NO_LOOP_CONFIGURE y"
+              "CONFIG_STACK_OPTIMIZATION_386 y"
+              "CONFIG_BZIP2_SMALL 9"
+              "CONFIG_CRC32 y"
+              "CONFIG_FEATURE_CP_REFLINK y"
+              "CONFIG_FACTOR y"
+              "CONFIG_LINK y"
+              "CONFIG_SHA256SUM y"
+              "CONFIG_NL y"
+              "CONFIG_NOHUP y"
+              "CONFIG_NPROC y"
+              "CONFIG_PASTE y"
+              "CONFIG_SHRED y"
+              "CONFIG_TEST1 y"
+              "CONFIG_TEST2 y"
+              "CONFIG_TSORT y"
+              "CONFIG_BB_ARCH y"
+              "CONFIG_BASE32 y"
+              "CONFIG_BASE64 y"
+              "CONFIG_RESUME y"
+              "CONFIG_RUN_INIT y"
+              "CONFIG_FEATURE_XARGS_SUPPORT_PARALLEL y"
+              "CONFIG_FEATURE_XARGS_SUPPORT_ARGS_FILE y"
+              "CONFIG_POWEROFF y"
+              "CONFIG_REBOOT y"
+              "CONFIG_FEATURE_WAIT_FOR_INIT y"
+              "CONFIG_LINUXRC y"
+              "CONFIG_FEATURE_INIT_QUIET y"
+              "CONFIG_FEATURE_INIT_MODIFY_CMDLINE y"
+              "CONFIG_MKPASSWD y"
+              "CONFIG_MODINFO y"
+              "CONFIG_BLKDISCARD y"
+              "CONFIG_FALLOCATE y"
+              "CONFIG_FSFREEZE y"
+              "CONFIG_GETOPT y"
+              "CONFIG_FEATURE_GETOPT_LONG y"
+              "CONFIG_HEXDUMP y"
+              "CONFIG_XXD y"
+              "CONFIG_FEATURE_MDEV_DAEMON y"
+              "CONFIG_MKE2FS y"
+              "CONFIG_MKDOSFS y"
+              "CONFIG_LINUX32 y"
+              "CONFIG_LINUX64 y"
+              "CONFIG_SETPRIV y"
+              "CONFIG_FEATURE_SETPRIV_DUMP y"
+              "CONFIG_FEATURE_SETPRIV_CAPABILITIES y"
+              "CONFIG_FEATURE_SETPRIV_CAPABILITY_NAMES y"
+              "CONFIG_UNSHARE y"
+              "CONFIG_BC y"
+              "CONFIG_FEATURE_DC_BIG y"
+              "CONFIG_FEATURE_BC_INTERACTIVE y"
+              "CONFIG_FEATURE_BC_LONG_OPTIONS y"
+              "CONFIG_FEATURE_CROND_SPECIAL_TIMES y"
+              "CONFIG_GETFATTR y"
+              "CONFIG_HEXEDIT y"
+              "CONFIG_I2CTRANSFER y"
+              "CONFIG_LSSCSI y"
+              "CONFIG_MIM y"
+              "CONFIG_PARTPROBE y"
+              "CONFIG_SEEDRNG y"
+              "CONFIG_SETFATTR y"
+              "CONFIG_TS y"
+              "CONFIG_UBIRENAME y"
+              
+              # User Preferences
               "CONFIG_FEATURE_TAR_LONG_OPTIONS y"
               "CONFIG_FEATURE_SORT_OPTIMIZE_MEMORY y"
               "CONFIG_FEATURE_SHOW_SCRIPT y"
               "CONFIG_FLOAT_DURATION y"
               "CONFIG_NOLOGIN y"
               "CONFIG_NSENTER y"
+              "CONFIG_FEATURE_START_STOP_DAEMON_LONG_OPTIONS y"
+              "CONFIG_FEATURE_SWAPON_PRI y"
+              "CONFIG_FEATURE_ETC_SERVICES y"
+              "CONFIG_FEATURE_CATN y"
+              "CONFIG_FEATURE_CATV y"
               
-              "CONFIG_WGET y"
-              "CONFIG_FEATURE_WGET_LONG_OPTIONS y"
-              "CONFIG_FEATURE_WGET_STATUSBAR y"
-              "CONFIG_FEATURE_WGET_AUTHENTICATION y"
-              "CONFIG_FEATURE_WGET_TIMEOUT y"
+              # Volume IDs
+              "CONFIG_FEATURE_VOLUMEID_BCACHE y"
+              "CONFIG_FEATURE_VOLUMEID_EROFS y"
+              "CONFIG_FEATURE_VOLUMEID_MINIX y"
+              "CONFIG_FEATURE_VOLUMEID_UBIFS y"
+              "CONFIG_FEATURE_VOLUMEID_XFS y"
           )
           
           CHECKS_UNSET=(
@@ -176,34 +279,42 @@ jobs:
               "CONFIG_TRY_LOOP_CONFIGURE"
               "CONFIG_LOOP_CONFIGURE"
               "CONFIG_FEATURE_WGET_FTP"
-              "CONFIG_FEATURE_WGET_HTTPS"
+              "CONFIG_WHOIS"
+              "CONFIG_UDHCPD"
+              "CONFIG_FEATURE_UDHCPD_BOOTP"
+              "CONFIG_FEATURE_UDHCPD_BASE_IP_ON_MAC"
+              "CONFIG_FEATURE_UDHCPD_WRITE_LEASES_EARLY"
+              "CONFIG_DUMPLEASES"
+              "CONFIG_DHCPRELAY"
+              "CONFIG_UDHCPC6"
+              "CONFIG_FEATURE_UDHCPC6_RFC3646"
+              "CONFIG_FEATURE_UDHCPC6_RFC4704"
+              "CONFIG_FEATURE_UDHCPC6_RFC4833"
+              "CONFIG_FEATURE_UDHCPC6_RFC5970"
+              "CONFIG_FEATURE_UDHCP_PORT"
+              "CONFIG_FEATURE_UDHCP_8021Q"
+              "CONFIG_ASH_BASH_SOURCE_CURDIR"
           )
 
           # -------------------------------------------------------
-          # 核心驗證函式 (Audit Core)
+          # 3. 核心功能函式
           # -------------------------------------------------------
           audit_config() {
               local FILE=$1
               local LIST_NAME=$2 
               local FAILURES=()
-              
               echo "   🔍 Auditing $FILE..."
-              if [ ! -f "$FILE" ]; then
-                  echo "      ❌ File not found: $FILE"
-                  return 1
-              fi
+              if [ ! -f "$FILE" ]; then echo "      ❌ File missing: $FILE"; return 1; fi
               
-              # Check Sets
               for ENTRY in "${CHECKS_SET[@]}"; do
                   KEY=${ENTRY%% *}
                   VAL=${ENTRY#* }
                   if ! grep -q "^${KEY}=${VAL}$" "$FILE"; then
-                      echo "      ❌ [FAIL] $KEY != $VAL"
+                      echo "      ❌ [FAIL] $KEY mismatch/missing"
                       FAILURES+=("$ENTRY")
                   fi
               done
               
-              # Check Unsets
               for KEY in "${CHECKS_UNSET[@]}"; do
                   if grep -q "^${KEY}=" "$FILE"; then
                       echo "      ❌ [FAIL] $KEY is SET (Should be UNSET)"
@@ -218,32 +329,26 @@ jobs:
               return 0
           }
 
-          # -------------------------------------------------------
-          # 修復函式 (Fixer)
-          # -------------------------------------------------------
           apply_fixes() {
               local FILE=$1
               local ITEMS=("${@:2}")
-              
               echo "   🛠️ Applying Fixes to $FILE..."
               for ITEM in "${ITEMS[@]}"; do
                   if [[ "$ITEM" == *" UNSET" ]]; then
                       KEY=${ITEM% UNSET}
                       sed -i "/$KEY/d" "$FILE"
                       echo "# $KEY is not set" >> "$FILE"
-                      echo "      -> Unset $KEY"
                   else
                       KEY=${ITEM%% *}
                       VAL=${ITEM#* }
                       sed -i "/$KEY/d" "$FILE"
                       echo "$KEY=$VAL" >> "$FILE"
-                      echo "      -> Set $KEY=$VAL"
                   fi
               done
           }
 
           # =======================================================
-          # 1. 原始碼準備
+          # 4. 執行流程
           # =======================================================
           echo "🏗️ [PHASE 1] Source Code Swap"
           rm -rf "$TARGET_DIR"
@@ -251,133 +356,102 @@ jobs:
           cd "$TARGET_DIR"
           [ -d "busybox-1.37.0" ] && cd "busybox-1.37.0"
 
-          # =======================================================
-          # 2. Config 初始化與初步注入
-          # =======================================================
           echo "🔧 [PHASE 2] Config Evolution"
           cp -f "$ORIGINAL_CONFIG" .config
-          
-          # 2.1 Clean & Inject
-          for KEY in "${CHECKS_UNSET[@]}"; do sed -i "/$KEY/d" .config; done
-          for ENTRY in "${CHECKS_SET[@]}"; do KEY=${ENTRY%% *}; sed -i "/$KEY/d" .config; done
-          
-          # 2.2 批量注入
-          cat >> .config <<EOF
-          CONFIG_SH_IS_ASH=y
-          CONFIG_BASH_IS_ASH=y
-          CONFIG_ASH=y
-          CONFIG_ASH_OPTIMIZE_FOR_SIZE=y
-          CONFIG_ASH_INTERNAL_GLOB=y
-          CONFIG_ASH_BASH_COMPAT=y
-          CONFIG_ASH_JOB_CONTROL=y
-          CONFIG_ASH_ALIAS=y
-          CONFIG_ASH_EXPAND_PRMT=y
-          CONFIG_ASH_GETOPTS=y
-          CONFIG_ASH_CMDCMD=y
-          CONFIG_ASH_HELP=y
-          CONFIG_SYSLOGD=y
-          CONFIG_FEATURE_ROTATE_LOGFILE=y
-          CONFIG_FEATURE_REMOTE_LOG=y
-          CONFIG_FEATURE_SYSLOGD_DUP=y
-          CONFIG_FEATURE_SYSLOGD_PRECISE_TIMESTAMPS=y
-          CONFIG_FEATURE_SYSLOGD_READ_BUFFER_SIZE=512
-          CONFIG_FEATURE_IPC_SYSLOG=y
-          CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE=4
-          CONFIG_KLOGD=y
-          CONFIG_FEATURE_KLOGD_KLOGCTL=y
-          CONFIG_LOGGER=y
-          CONFIG_UDHCPC_DEFAULT_INTERFACE="eth3"
-          CONFIG_FEATURE_IP_ROUTE_DIR=""
-          CONFIG_DHCP6C=y
-          CONFIG_WGET=y
-          CONFIG_FEATURE_WGET_LONG_OPTIONS=y
-          CONFIG_FEATURE_WGET_STATUSBAR=y
-          CONFIG_FEATURE_WGET_AUTHENTICATION=y
-          CONFIG_FEATURE_WGET_TIMEOUT=y
-          CONFIG_NO_LOOP_CONFIGURE=y
-          CONFIG_SHA1_SMALL=1
-          CONFIG_FEATURE_TAR_LONG_OPTIONS=y
-          CONFIG_FEATURE_SORT_OPTIMIZE_MEMORY=y
-          CONFIG_FEATURE_SHOW_SCRIPT=y
-          CONFIG_FLOAT_DURATION=y
-          CONFIG_NOLOGIN=y
-          CONFIG_NSENTER=y
-          # CONFIG_HUSH is not set
-          # CONFIG_FEATURE_DHCP6_AUTH is not set
-          # CONFIG_TRY_LOOP_CONFIGURE is not set
-          # CONFIG_LOOP_CONFIGURE is not set
-          # CONFIG_FEATURE_WGET_FTP is not set
-          # CONFIG_FEATURE_WGET_HTTPS is not set
-          EOF
+          yes "" | make oldconfig || true
 
-          # 2.3 oldconfig 整合
+          # 4.3 [SMART CLEAN] 智慧清理 (防止重複定義)
+          echo "   -> Cleaning ALL target keys to prevent reassign warnings..."
+          for ENTRY in "${CHECKS_SET[@]}"; do
+              KEY=${ENTRY%% *}
+              sed -i "/$KEY/d" .config
+          done
+          for KEY in "${CHECKS_UNSET[@]}"; do
+              sed -i "/$KEY/d" .config
+          done
+          echo "   ✅ Clean complete."
+
+          # 4.4 [INJECT] 注入設定
+          echo "   -> Injecting Specs..."
+          {
+              echo "# --- Custom Injection Start ---"
+              for ENTRY in "${CHECKS_SET[@]}"; do
+                  KEY=${ENTRY%% *}
+                  VAL=${ENTRY#* }
+                  echo "$KEY=$VAL"
+              done
+              for KEY in "${CHECKS_UNSET[@]}"; do
+                  echo "# $KEY is not set"
+              done
+              echo "# --- Custom Injection End ---"
+          } >> .config
+
+          # 4.5 整合
           yes "" | make oldconfig || true
 
           # =======================================================
-          # 3. [IRONCLAD AUDIT LOOP] 驗證當前 .config
+          # 5. [IRONCLAD AUDIT] 本地驗證迴圈
           # =======================================================
-          echo "🔍 [PHASE 3] Ironclad Audit Loop (Current)"
+          echo "🔍 [PHASE 3] Local Audit Loop (.config)"
           CURRENT_FILE=".config"
           
           # Round 1
           FAIL_LIST_1=()
           if ! audit_config "$CURRENT_FILE" FAIL_LIST_1; then
-              echo "⚠️ Round 1 Failed. Issues: ${#FAIL_LIST_1[@]}"
+              echo "⚠️ Round 1 Failed. Fix count: ${#FAIL_LIST_1[@]}"
               apply_fixes "$CURRENT_FILE" "${FAIL_LIST_1[@]}"
           else
-              echo "✅ Round 1 Passed Perfect."
+              echo "✅ Round 1 Passed."
           fi
           
           # Round 2
           FAIL_LIST_2=()
           if ! audit_config "$CURRENT_FILE" FAIL_LIST_2; then
-              echo "⚠️ Round 2 Failed. Issues: ${#FAIL_LIST_2[@]}"
+              echo "⚠️ Round 2 Failed. Fix count: ${#FAIL_LIST_2[@]}"
               apply_fixes "$CURRENT_FILE" "${FAIL_LIST_2[@]}"
           else
               echo "✅ Round 2 Passed."
           fi
           
-          # Round 3 (Death Check)
+          # Round 3
           FAIL_LIST_3=()
           if ! audit_config "$CURRENT_FILE" FAIL_LIST_3; then
               echo "⛔ FATAL: Round 3 Failed!"
-              printf '%s\n' "${FAIL_LIST_3[@]}"
-              echo "🚫 GATE CLOSED."
+              printf '   - %s\n' "${FAIL_LIST_3[@]}"
               exit 1
           fi
-          echo "✅ Round 3 Passed. Config is clean."
+          echo "✅ Round 3 Passed. Config is Perfect."
 
           # =======================================================
-          # 4. [SYNC GATE & FULL VERIFY] 同步後全目標大體檢
+          # 6. [SYNC & FULL VERIFY] 同步 + 逐一驗證
           # =======================================================
-          echo "🌍 [PHASE 4] Executing Sync & Full Verify..."
+          echo "🌍 [PHASE 4] Sync & Global Verify"
           
-          echo "   -> Propagating to $SYNC_TARGET_2"
+          echo "   -> Propagating to Targets..."
           cp -f .config "$SYNC_TARGET_2"
-          echo "   -> Propagating to $SYNC_TARGET_3"
           cp -f .config "$SYNC_TARGET_3"
           
-          # 定義目標陣列 (這裡重新定義，確保變數已展開)
           ALL_TARGETS=("$SYNC_TARGET_1" "$SYNC_TARGET_2" "$SYNC_TARGET_3")
           
-          echo "   🔍 Verifying ALL propagated files (Full Audit)..."
           for TARGET in "${ALL_TARGETS[@]}"; do
-              if ! audit_config "$TARGET" JUNK_VAR; then
-                  echo "❌ FATAL: Verification Failed for $TARGET!"
-                  # 這裡是最後一道防線，如果同步過去的檔案有問題，必須停止
+              echo "   ----------------------------------------"
+              echo "   🔍 Final Audit for: $TARGET"
+              FINAL_FAILS=()
+              if ! audit_config "$TARGET" FINAL_FAILS; then
+                  echo "❌ FATAL ERROR: Verification Failed on $TARGET"
+                  printf '   - %s\n' "${FINAL_FAILS[@]}"
                   exit 1
               else
                   echo "✅ Verified: $TARGET"
               fi
           done
-          echo "✅ All targets synced and fully verified."
+          echo "✅ All 3 Targets are 100% Synchronized and Verified."
 
           # =======================================================
-          # 5. [CODE & BUILD] 程式碼與依賴驗證
+          # 7. [CODE & BUILD] 程式碼與依賴驗證
           # =======================================================
           echo "💉 [PHASE 5] Code & Build Verify"
           
-          # Services.c Patching
           cd "$REPO_ROOT/trunk/user/rc"
           RC_FILE="services.c" 
           PATCH_FILE="services_syslogd_fix.patch"
@@ -414,7 +488,6 @@ jobs:
               echo "✅ Code Patch Verified."
           fi
 
-          # Build Script Cleanup
           cd "$REPO_ROOT/trunk"
           grep -rl "busybox-1.24.x" user/ | xargs -r sed -i "s/busybox-1.24.x/busybox-1.37.0/g"
           grep -rl "busybox-1.24.2" user/ | xargs -r sed -i "s/busybox-1.24.2/busybox-1.37.0/g"
@@ -431,7 +504,7 @@ jobs:
           echo "✅ Build System Verified."
 
           set +x
-          echo "🎉 BusyBox 1.37.0 Evolution Complete (V41: Ultimate Fortress)."
+          echo "🎉 BusyBox 1.37.0 Evolution Complete (V43: Ultimate Logic)."
           echo "::endgroup::"
 
       # =======================================================
