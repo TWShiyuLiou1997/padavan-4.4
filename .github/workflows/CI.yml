@@ -501,7 +501,112 @@ jobs:
               echo "❌ Build script cleanup failed!"
               exit 1
           fi
-          echo "✅ Build System Verified."
+          echo "✅ Build System Verified (No old versions found)."
+
+          # =======================================================
+          # 8. [SECURITY] CVE-2025-60876 & CVE-2025-46394
+          # =======================================================
+          echo "🛡️ [PHASE 7] Applying Security Patches"
+          
+          # 1. 進入 busybox 源碼目錄
+          # 注意：此時我們在 trunk 目錄 (PHASE 6 結束位置)，所以要進 user/busybox
+          cd user/busybox
+          
+          # 進入版本號目錄 (如果存在)
+          if [ -d "busybox-1.37.0" ]; then cd "busybox-1.37.0"; fi
+          
+          # 2. 建立 patches 專用目錄
+          echo "   -> Creating 'patches' directory..."
+          mkdir -p patches
+
+          # -------------------------------------------------------
+          # [Patch 1] CVE-2025-60876: Wget Header Injection
+          # -------------------------------------------------------
+          cat << 'CVE_PATCH_1' > patches/CVE-2025-60876.patch
+          From: Radoslav Kolev <radoslav.kolev@suse.com>
+          Subject: [PATCH] wget: don't allow control characters or spaces in the URL
+
+          Fixes CVE-2025-60876 malicious URL can be used to inject
+          HTTP headers in the request.
+
+          ---
+           networking/wget.c | 9 +++++++++
+           1 file changed, 9 insertions(+)
+
+          diff --git a/networking/wget.c b/networking/wget.c
+          index ec3767793..b8a6d02bb 100644
+          --- a/networking/wget.c
+          +++ b/networking/wget.c
+          @@ -536,6 +536,15 @@ static void parse_url(const char *src_url, struct host_info *h)
+           {
+           	char *url, *p, *sp;
+           
+          +	/* Fix for CVE-2025-60876 - don't allow control characters or spaces in the URL */
+          +	/* otherwise a malicious URL can be used to inject HTTP headers in the request */
+          +	unsigned char *u = (void *) src_url;
+          +	while (*u) {
+          +		if (*u <= ' ')
+          +			bb_simple_error_msg_and_die("Unencoded control character found in the URL!");
+          +		u++;
+          +	}
+          +
+           	free(h->allocated);
+           	h->allocated = url = xstrdup(src_url);
+          CVE_PATCH_1
+
+          echo "   -> Applying patches/CVE-2025-60876.patch..."
+          patch -p1 -N -i patches/CVE-2025-60876.patch || echo "⚠️ CVE-2025-60876 patch fuzzy/already applied."
+
+          # -------------------------------------------------------
+          # [Patch 2] CVE-2025-46394: Libarchive Terminal Injection (V2)
+          # 已移除 testsuite 測試腳本，只修復核心 .c 檔案
+          # -------------------------------------------------------
+          cat << 'CVE_PATCH_2' > patches/CVE-2025-46394.patch
+          From: Denys Vlasenko <vda.linux@googlemail.com>
+          Subject: [PATCH] archival/libarchive: sanitize filenames on output
+
+          This fixes CVE-2025-46394 (terminal escape sequence injection)
+
+          ---
+           archival/libarchive/header_list.c         | 2 +-
+           archival/libarchive/header_verbose_list.c | 4 ++--
+           2 files changed, 3 insertions(+), 3 deletions(-)
+
+          diff --git a/archival/libarchive/header_list.c b/archival/libarchive/header_list.c
+          index 0621aa406..9490b3635 100644
+          --- a/archival/libarchive/header_list.c
+          +++ b/archival/libarchive/header_list.c
+          @@ -8,5 +8,5 @@
+           void FAST_FUNC header_list(const file_header_t *file_header)
+           {
+           //TODO: cpio -vp DIR should output "DIR/NAME", not just "NAME" */
+          -	puts(file_header->name);
+          +	puts(printable_string(file_header->name));
+           }
+          diff --git a/archival/libarchive/header_verbose_list.c b/archival/libarchive/header_verbose_list.c
+          index a575a08a0..e7a09430d 100644
+          --- a/archival/libarchive/header_verbose_list.c
+          +++ b/archival/libarchive/header_verbose_list.c
+          @@ -57,13 +57,13 @@ void FAST_FUNC header_verbose_list(const file_header_t *file_header)
+           		ptm->tm_hour,
+           		ptm->tm_min,
+           		ptm->tm_sec,
+          -		file_header->name);
+          +		printable_string(file_header->name));
+           
+           #endif /* FEATURE_TAR_UNAME_GNAME */
+           
+           	/* NB: GNU tar shows "->" for symlinks and "link to" for hardlinks */
+           	if (file_header->link_target) {
+          -		printf(" -> %s", file_header->link_target);
+          +		printf(" -> %s", printable_string(file_header->link_target));
+           	}
+           	bb_putchar('\n');
+           }
+          CVE_PATCH_2
+
+          echo "   -> Applying patches/CVE-2025-46394.patch..."
+          patch -p1 -N -i patches/CVE-2025-46394.patch || echo "⚠️ CVE-2025-46394 patch fuzzy/already applied."
 
           set +x
           echo "🎉 BusyBox 1.37.0 Evolution Complete (V43: Ultimate Logic)."
@@ -1333,6 +1438,28 @@ jobs:
               echo "⚠️ Warning: build.log not found in trunk/"
           fi
 
+          # =======================================================
+          # 🔥 [NEW] 收集 BusyBox Patches (CVE Debug)
+          # =======================================================
+          BB_SRC_DIR="$WORK_DIR/trunk/user/busybox/busybox-1.37.0"
+          DEBUG_BB_DIR="$PACK_DIR/debug_busybox"
+          mkdir -p "$DEBUG_BB_DIR"
+
+          # 檢查 Phase 7 建立的 patches 目錄是否存在
+          if [ -d "$BB_SRC_DIR/patches" ]; then
+              echo "✅ Found BusyBox patches directory, collecting..."
+              cp "$BB_SRC_DIR/patches"/*.patch "$DEBUG_BB_DIR/" 2>/dev/null || true
+              echo "- 🛡️ **BusyBox Patches**: Collected in \`debug_busybox\`"
+              
+              # 額外收集: BusyBox 的實際編譯 .config (確認 CVE 編譯選項)
+              if [ -f "$BB_SRC_DIR/.config" ]; then
+                  cp "$BB_SRC_DIR/.config" "$DEBUG_BB_DIR/busybox_actual_build.config"
+              fi
+          else
+              echo "⚠️ Warning: BusyBox patches directory not found (Phase 7 issue?)."
+              echo "- ⚠️ **BusyBox Patches**: Not found"
+          fi
+          
           # =======================================================
           # 🔥 2. 強化：收集 iptables 相關產物 (智慧驗證版)
           # =======================================================
